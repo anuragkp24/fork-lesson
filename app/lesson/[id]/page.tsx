@@ -4,6 +4,7 @@ import { AppNav } from "@/components/app-nav";
 import { driveOpenUrl } from "@/lib/library/links";
 import { createClient, getUser } from "@/lib/supabase/server";
 import { attachmentLabel } from "@/lib/sync/map";
+import { ForkDialog, type ForkClass, type ForkItem } from "./fork-dialog";
 
 type LessonDetail = {
   id: string;
@@ -43,6 +44,29 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
 
   const isOwner = lesson.owner_id === user.id;
   const attachments = [...lesson.attachments].sort((a, b) => a.position - b.position);
+
+  // Only a non-owner forks, into one of their own classes.
+  let classes: ForkClass[] = [];
+  if (!isOwner) {
+    const { data } = await supabase
+      .from("courses")
+      .select("id, name, section, topics(name)")
+      .eq("owner_id", user.id)
+      .order("name")
+      .returns<{ id: string; name: string; section: string | null; topics: { name: string }[] }[]>();
+    classes = (data ?? []).map((c) => ({ ...c, topics: c.topics.map((t) => t.name) }));
+  }
+
+  const forkItems: ForkItem[] = attachments.map((att) => {
+    const base = { key: att.id, label: attachmentLabel(att), title: att.title ?? "(untitled)" };
+    if (att.kind === "drive") {
+      return att.library_file_id
+        ? { ...base, outcome: "copy", note: "Copied to your Drive (Fork Lesson folder)" }
+        : { ...base, outcome: "skip", note: "Can't be copied. Re-add it after forking." };
+    }
+    if (att.kind === "unsupported") return { ...base, outcome: "skip", note: "Can't be copied. Re-add it after forking." };
+    return { ...base, outcome: "as-is", note: "Added as is" };
+  });
 
   return (
     <>
@@ -111,13 +135,13 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
 
         {!isOwner && (
           <div>
-            <button
-              type="button"
-              disabled
-              className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white opacity-50 dark:bg-white dark:text-black"
-            >
-              Fork to my class (coming next)
-            </button>
+            <ForkDialog
+              lessonId={lesson.id}
+              lessonTitle={lesson.title}
+              lessonTopic={lesson.topic_name}
+              classes={classes}
+              items={forkItems}
+            />
           </div>
         )}
       </main>

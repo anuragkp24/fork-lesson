@@ -1,13 +1,6 @@
 import "server-only";
-import { GoogleApiError } from "@/lib/google/classroom";
-import {
-  copyFile,
-  createFolder,
-  ensureDomainReader,
-  folderUsable,
-  getFileInfo,
-  reuploadFile,
-} from "@/lib/google/drive";
+import { copyWithFallback, createFolder, ensureDomainReader, folderUsable, getFileInfo } from "@/lib/google/drive";
+import { describeFailure } from "@/lib/google/describe";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const LIBRARY_FOLDER_NAME = "Fork Lesson library";
@@ -18,12 +11,6 @@ type PendingAttachment = {
   drive_file_id: string;
   mime_type: string | null;
 };
-
-function describe(err: unknown): string {
-  if (err instanceof GoogleApiError) return `Google said ${err.message.replace("Google API ", "")}`;
-  if (err instanceof Error && err.message === "unsupported_type") return "This kind of file can't be copied";
-  return "Unexpected error";
-}
 
 // Publishes the teacher's shared lessons: copies each Drive attachment into
 // the "Fork Lesson library" folder in their Drive, shared with their domain
@@ -65,8 +52,8 @@ export async function publishLibrary(userId: string, domain: string, token: stri
       }
     }
   } catch (err) {
-    console.error("[publish] failed", { userId, error: describe(err) });
-    folderError = `Couldn't set up the Fork Lesson library: ${describe(err)}.`;
+    console.error("[publish] failed", { userId, error: describeFailure(err) });
+    folderError = `Couldn't set up the Fork Lesson library: ${describeFailure(err)}.`;
   }
 
   // published_count = Drive files from this teacher's lessons that are in the library
@@ -111,19 +98,11 @@ async function publishOne(
     const info = att.title && att.mime_type ? { name: att.title, mimeType: att.mime_type } : await getFileInfo(att.drive_file_id, token);
     const name = att.title ?? info.name;
 
-    try {
-      const id = await copyFile(att.drive_file_id, name, folderId, token);
-      console.log("[publish] copied with files.copy");
-      return { libraryFileId: id, error: null };
-    } catch (err) {
-      // drive.file only reaches files this app made; fall back to read + create.
-      if (!(err instanceof GoogleApiError) || (err.httpStatus !== 403 && err.httpStatus !== 404)) throw err;
-      const id = await reuploadFile(att.drive_file_id, name, info.mimeType, folderId, token);
-      console.log("[publish] copied by re-upload (files.copy was refused)");
-      return { libraryFileId: id, error: null };
-    }
+    const copy = await copyWithFallback(att.drive_file_id, name, info.mimeType, folderId, token);
+    console.log(`[publish] copied via ${copy.method}`);
+    return { libraryFileId: copy.id, error: null };
   } catch (err) {
-    console.error("[publish] file failed", { error: describe(err) });
-    return { libraryFileId: null, error: describe(err) };
+    console.error("[publish] file failed", { error: describeFailure(err) });
+    return { libraryFileId: null, error: describeFailure(err) };
   }
 }

@@ -124,3 +124,31 @@ export async function reuploadFile(
   );
   return ((await response.json()) as { id: string }).id;
 }
+
+// Moves a file to the trash (reversible, unlike delete). Used to undo copies
+// when a fork fails after copying.
+export async function trashFile(fileId: string, token: string): Promise<void> {
+  await driveFetch(
+    withParams(`${FILES}/${encodeURIComponent(fileId)}`, { fields: "id" }),
+    token,
+    jsonInit("PATCH", { trashed: true })
+  );
+}
+
+// files.copy first; if Drive refuses (403/404, because drive.file only
+// reaches files this app made), read + create instead.
+export async function copyWithFallback(
+  fileId: string,
+  name: string,
+  mimeType: string | null,
+  folderId: string,
+  token: string
+): Promise<{ id: string; method: "copy" | "reupload" }> {
+  try {
+    return { id: await copyFile(fileId, name, folderId, token), method: "copy" };
+  } catch (err) {
+    if (!(err instanceof GoogleApiError) || (err.httpStatus !== 403 && err.httpStatus !== 404)) throw err;
+    const type = mimeType ?? (await getFileInfo(fileId, token)).mimeType;
+    return { id: await reuploadFile(fileId, name, type, folderId, token), method: "reupload" };
+  }
+}
