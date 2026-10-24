@@ -1,42 +1,156 @@
 import { getAccessToken } from "@/lib/google/access-token";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { getUser } from "@/lib/supabase/server";
+import { createClient, getUser } from "@/lib/supabase/server";
+import { attachmentLabel } from "@/lib/sync/map";
+import { syncAction } from "./actions";
+import { SyncButton } from "./sync-button";
 
-// Placeholder until sync lands: shows the signed-in teacher and whether the
-// saved Google connection works. Never shows a token.
+type Attachment = {
+  id: string;
+  position: number;
+  kind: string;
+  title: string | null;
+  url: string | null;
+  mime_type: string | null;
+  unsupported_type: string | null;
+  publish_error: string | null;
+};
+
+type Lesson = {
+  id: string;
+  title: string;
+  description: string | null;
+  topic_name: string | null;
+  source_updated_at: string | null;
+  attachments: Attachment[];
+};
+
+type Course = {
+  id: string;
+  name: string;
+  section: string | null;
+  lessons: Lesson[];
+};
+
+function groupByTopic(lessons: Lesson[]): [string | null, Lesson[]][] {
+  const groups = new Map<string | null, Lesson[]>();
+  for (const lesson of lessons) {
+    groups.set(lesson.topic_name, [...(groups.get(lesson.topic_name) ?? []), lesson]);
+  }
+  // Named topics A to Z, lessons without a topic last.
+  return [...groups.entries()].sort(([a], [b]) => (a === null ? 1 : b === null ? -1 : a.localeCompare(b)));
+}
+
+function newestFirst(a: Lesson, b: Lesson) {
+  return (b.source_updated_at ?? "").localeCompare(a.source_updated_at ?? "");
+}
+
 export default async function LessonsPage() {
   const user = (await getUser())!;
-  const admin = createAdminClient();
+  // The signed-in client, so row level security decides what comes back.
+  const supabase = await createClient();
 
-  const [{ data: profile }, { data: tokenRow }, google] = await Promise.all([
-    admin.from("users").select("name, email, domain").eq("id", user.id).maybeSingle(),
-    admin.from("google_tokens").select("scopes, updated_at").eq("user_id", user.id).maybeSingle(),
+  const [{ data: courses }, { data: sync }, { data: profile }, google] = await Promise.all([
+    supabase
+      .from("courses")
+      .select(
+        "id, name, section, lessons(id, title, description, topic_name, source_updated_at, attachments(id, position, kind, title, url, mime_type, unsupported_type, publish_error))"
+      )
+      .eq("owner_id", user.id)
+      .order("name")
+      .returns<Course[]>(),
+    supabase.from("sync_state").select("*").eq("user_id", user.id).maybeSingle(),
+    supabase.from("users").select("name, email, domain").eq("id", user.id).maybeSingle(),
     getAccessToken(user.id),
   ]);
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-6 py-16">
-      <h1 className="text-2xl font-semibold tracking-tight">My lessons</h1>
-      <dl className="grid grid-cols-[10rem_1fr] gap-y-2 text-sm">
-        <dt className="text-zinc-500">Signed in as</dt>
-        <dd>{profile?.name ?? "(no name)"} · {profile?.email ?? user.email}</dd>
-        <dt className="text-zinc-500">Sharing domain</dt>
-        <dd>{profile?.domain ?? "not saved"}</dd>
-        <dt className="text-zinc-500">Refresh token</dt>
-        <dd>
-          {tokenRow
-            ? `saved, encrypted (${tokenRow.scopes.length} scopes, ${new Date(tokenRow.updated_at).toLocaleString()})`
-            : "not saved"}
-        </dd>
-        <dt className="text-zinc-500">Google connection</dt>
-        <dd>{google.status === "ok" ? "working" : `${google.status}: ${google.reason}`}</dd>
-      </dl>
-      <p className="text-sm text-zinc-500">Sync and lessons come next.</p>
-      <form action="/auth/signout" method="post">
-        <button type="submit" className="rounded-md border border-zinc-300 px-3 py-2 text-sm">
-          Sign out
-        </button>
-      </form>
+    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-8 px-6 py-12">
+      <header className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">My lessons</h1>
+          <p className="text-sm text-zinc-500">
+            {sync?.last_finished_at
+              ? `Last synced ${new Date(sync.last_finished_at).toLocaleString()} · ${sync.courses_count ?? 0} classes, ${sync.lessons_count ?? 0} lessons`
+              : "Not synced yet."}
+          </p>
+        </div>
+        <form action={syncAction}>
+          <SyncButton />
+        </form>
+      </header>
+
+      {sync?.last_error && (
+        <p role="alert" className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900">
+          Sync problem: {sync.last_error}
+        </p>
+      )}
+
+      {(courses ?? []).map((course) => (
+        <section key={course.id} className="flex flex-col gap-4">
+          <h2 className="border-b border-zinc-200 pb-2 text-lg font-semibold dark:border-zinc-800">
+            {course.name}
+            {course.section ? ` · ${course.section}` : ""}
+          </h2>
+          {course.lessons.length === 0 && <p className="text-sm text-zinc-500">No lessons in this class.</p>}
+          {groupByTopic([...course.lessons].sort(newestFirst)).map(([topic, lessons]) => (
+            <div key={topic ?? "(none)"} className="flex flex-col gap-3">
+              <h3 className="text-sm font-medium uppercase tracking-wide text-zinc-500">{topic ?? "No topic"}</h3>
+              {lessons.map((lesson) => (
+                <article key={lesson.id} className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+                  <h4 className="font-medium">{lesson.title}</h4>
+                  {lesson.description && (
+                    <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                      {lesson.description.length > 160 ? `${lesson.description.slice(0, 160)}…` : lesson.description}
+                    </p>
+                  )}
+                  <ul className="mt-3 flex flex-col gap-1 text-sm">
+                    {[...lesson.attachments]
+                      .sort((a, b) => a.position - b.position)
+                      .map((att) => (
+                        <li key={att.id} className="flex items-baseline gap-2">
+                          <span className="w-14 shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-center text-xs font-medium dark:bg-zinc-800">
+                            {attachmentLabel(att)}
+                          </span>
+                          {att.url ? (
+                            <a href={att.url} target="_blank" rel="noopener noreferrer" className="underline">
+                              {att.title ?? att.url}
+                            </a>
+                          ) : (
+                            <span>{att.title ?? "(untitled)"}</span>
+                          )}
+                          {att.kind === "unsupported" && (
+                            <span className="text-xs text-amber-700">Not copied. Re-add it after forking.</span>
+                          )}
+                        </li>
+                      ))}
+                  </ul>
+                </article>
+              ))}
+            </div>
+          ))}
+        </section>
+      ))}
+
+      {courses?.length === 0 && sync?.last_finished_at && !sync.last_error && (
+        <p className="text-sm text-zinc-500">No active classes found where you are a teacher.</p>
+      )}
+
+      <details className="text-sm">
+        <summary className="cursor-pointer text-zinc-500">Account and connection</summary>
+        <dl className="mt-3 grid grid-cols-[10rem_1fr] gap-y-2">
+          <dt className="text-zinc-500">Signed in as</dt>
+          <dd>{profile?.name ?? "(no name)"} · {profile?.email ?? user.email}</dd>
+          <dt className="text-zinc-500">Sharing domain</dt>
+          <dd>{profile?.domain ?? "not saved"}</dd>
+          <dt className="text-zinc-500">Google connection</dt>
+          <dd>{google.status === "ok" ? "working" : `${google.status}: ${google.reason}`}</dd>
+        </dl>
+        <form action="/auth/signout" method="post" className="mt-4">
+          <button type="submit" className="rounded-md border border-zinc-300 px-3 py-2 text-sm">
+            Sign out
+          </button>
+        </form>
+      </details>
     </main>
   );
 }
