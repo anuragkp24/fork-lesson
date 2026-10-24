@@ -14,18 +14,21 @@ export class GoogleApiError extends Error {
   }
 }
 
+// Builds the error for a failed Google response, from its status only.
+export async function apiError(response: Response): Promise<GoogleApiError> {
+  let googleStatus: string | null = null;
+  try {
+    const body = await response.json();
+    if (typeof body?.error?.status === "string") googleStatus = body.error.status;
+  } catch {
+    // not JSON; the HTTP status is enough
+  }
+  return new GoogleApiError(response.status, googleStatus);
+}
+
 async function getJson<T>(url: URL, token: string): Promise<T> {
   const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
-  if (!response.ok) {
-    let googleStatus: string | null = null;
-    try {
-      const body = await response.json();
-      if (typeof body?.error?.status === "string") googleStatus = body.error.status;
-    } catch {
-      // not JSON; the HTTP status is enough
-    }
-    throw new GoogleApiError(response.status, googleStatus);
-  }
+  if (!response.ok) throw await apiError(response);
   return (await response.json()) as T;
 }
 

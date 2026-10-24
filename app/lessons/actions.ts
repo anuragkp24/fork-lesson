@@ -5,6 +5,7 @@ import { emailDomain } from "@/lib/domain";
 import { getAccessToken } from "@/lib/google/access-token";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getUser } from "@/lib/supabase/server";
+import { publishLibrary } from "@/lib/publish/run";
 import { runSync } from "@/lib/sync/run";
 
 export async function syncAction() {
@@ -22,7 +23,9 @@ export async function syncAction() {
           : "Couldn't reach Google. Try again in a minute.",
     });
   } else {
-    await runSync(user.id, emailDomain(user.email), token.accessToken);
+    const domain = emailDomain(user.email);
+    await runSync(user.id, domain, token.accessToken);
+    await publishLibrary(user.id, domain, token.accessToken);
   }
 
   revalidatePath("/lessons");

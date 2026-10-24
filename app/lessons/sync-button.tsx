@@ -10,7 +10,7 @@ export function SyncButton() {
       disabled={pending}
       className="rounded-md bg-black px-3 py-2 text-sm font-medium text-white disabled:opacity-60 dark:bg-white dark:text-black"
     >
-      {pending ? "Syncing…" : "Sync from Classroom"}
+      {pending ? "Syncing…" : "Sync and publish"}
     </button>
   );
 }

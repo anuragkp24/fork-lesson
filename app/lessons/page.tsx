@@ -1,5 +1,8 @@
+import Link from "next/link";
+import { AppNav } from "@/components/app-nav";
 import { getAccessToken } from "@/lib/google/access-token";
 import { createClient, getUser } from "@/lib/supabase/server";
+import { driveOpenUrl } from "@/lib/library/links";
 import { attachmentLabel } from "@/lib/sync/map";
 import { syncAction } from "./actions";
 import { SyncButton } from "./sync-button";
@@ -12,6 +15,7 @@ type Attachment = {
   url: string | null;
   mime_type: string | null;
   unsupported_type: string | null;
+  library_file_id: string | null;
   publish_error: string | null;
 };
 
@@ -53,7 +57,7 @@ export default async function LessonsPage() {
     supabase
       .from("courses")
       .select(
-        "id, name, section, lessons(id, title, description, topic_name, source_updated_at, attachments(id, position, kind, title, url, mime_type, unsupported_type, publish_error))"
+        "id, name, section, lessons(id, title, description, topic_name, source_updated_at, attachments(id, position, kind, title, url, mime_type, unsupported_type, library_file_id, publish_error))"
       )
       .eq("owner_id", user.id)
       .order("name")
@@ -64,13 +68,15 @@ export default async function LessonsPage() {
   ]);
 
   return (
+    <>
+    <AppNav current="lessons" />
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-8 px-6 py-12">
       <header className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">My lessons</h1>
           <p className="text-sm text-zinc-500">
             {sync?.last_finished_at
-              ? `Last synced ${new Date(sync.last_finished_at).toLocaleString()} · ${sync.courses_count ?? 0} classes, ${sync.lessons_count ?? 0} lessons`
+              ? `Last synced ${new Date(sync.last_finished_at).toLocaleString()} · ${sync.courses_count ?? 0} classes, ${sync.lessons_count ?? 0} lessons · ${sync.published_count ?? 0} files in the library`
               : "Not synced yet."}
           </p>
         </div>
@@ -97,7 +103,11 @@ export default async function LessonsPage() {
               <h3 className="text-sm font-medium uppercase tracking-wide text-zinc-500">{topic ?? "No topic"}</h3>
               {lessons.map((lesson) => (
                 <article key={lesson.id} className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
-                  <h4 className="font-medium">{lesson.title}</h4>
+                  <h4 className="font-medium">
+                    <Link href={`/lesson/${lesson.id}`} className="hover:underline">
+                      {lesson.title}
+                    </Link>
+                  </h4>
                   {lesson.description && (
                     <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
                       {lesson.description.length > 160 ? `${lesson.description.slice(0, 160)}…` : lesson.description}
@@ -118,6 +128,23 @@ export default async function LessonsPage() {
                           ) : (
                             <span>{att.title ?? "(untitled)"}</span>
                           )}
+                          {att.kind === "drive" &&
+                            (att.library_file_id ? (
+                              <a
+                                href={driveOpenUrl(att.library_file_id)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-green-700 underline"
+                              >
+                                In library
+                              </a>
+                            ) : att.publish_error ? (
+                              <span className="text-xs text-red-700">
+                                This file couldn&apos;t be shared ({att.publish_error})
+                              </span>
+                            ) : (
+                              <span className="text-xs text-zinc-500">Not shared yet</span>
+                            ))}
                           {att.kind === "unsupported" && (
                             <span className="text-xs text-amber-700">Not copied. Re-add it after forking.</span>
                           )}
@@ -152,5 +179,6 @@ export default async function LessonsPage() {
         </form>
       </details>
     </main>
+    </>
   );
 }
