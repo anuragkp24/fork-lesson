@@ -1,7 +1,9 @@
 import Link from "next/link";
-import { AppNav } from "@/components/app-nav";
-import { attachmentSummary, matchesQuery } from "@/lib/library/search";
+import { AppHeader } from "@/components/app-header";
+import { FileChip } from "@/components/file-chip";
+import { attachmentSummaryParts, matchesQuery } from "@/lib/library/search";
 import { createClient, getUser } from "@/lib/supabase/server";
+import { btnPrimary, card, input } from "@/lib/ui";
 
 type LibraryLesson = {
   id: string;
@@ -33,54 +35,76 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
     .returns<LibraryLesson[]>();
 
   const lessons = (data ?? []).filter((l) =>
-    matchesQuery([l.title, l.description, l.topic_name, l.teacher?.name, l.teacher?.email, l.course?.name, l.course?.section], q)
+    matchesQuery(
+      [l.title, l.description, l.topic_name, l.teacher?.name, l.teacher?.email, l.course?.name, l.course?.section],
+      q
+    )
   );
+  const noun = lessons.length === 1 ? "lesson" : "lessons";
 
   return (
     <>
-      <AppNav current="library" />
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-10">
-        <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
-        <form action="/library" className="flex gap-2">
+      <AppHeader current="library" />
+      <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 px-5 py-10">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-3xl font-bold">Library</h1>
+          <p className="text-muted">Lessons shared by teachers in your district. Fork one into your own class.</p>
+        </div>
+
+        <form action="/library" role="search" className="flex gap-2">
           <input
             type="search"
             name="q"
             defaultValue={q}
+            aria-label="Search the library"
             placeholder="Search by lesson, teacher, class or topic"
-            className="flex-1 rounded-md border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
+            className={input}
           />
-          <button type="submit" className="rounded-md bg-black px-3 py-2 text-sm font-medium text-white dark:bg-white dark:text-black">
+          <button type="submit" className={btnPrimary}>
             Search
           </button>
         </form>
 
-        <p className="text-sm text-zinc-500">
-          {q ? `${lessons.length} ${lessons.length === 1 ? "lesson" : "lessons"} matching “${q}”` : `${lessons.length} shared ${lessons.length === 1 ? "lesson" : "lessons"} in your school`}
+        <p className="text-sm text-muted">
+          {q ? `${lessons.length} ${noun} matching “${q}”` : `${lessons.length} shared ${noun} in your district`}
         </p>
 
-        <ul className="flex flex-col gap-3">
-          {lessons.map((lesson) => (
-            <li key={lesson.id}>
-              <Link
-                href={`/lesson/${lesson.id}`}
-                className="block rounded-lg border border-zinc-200 p-4 hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
-              >
-                <h2 className="font-medium">{lesson.title}</h2>
-                <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-                  {lesson.owner_id === user.id ? "You" : (lesson.teacher?.name ?? lesson.teacher?.email ?? "A teacher")}
-                  {lesson.course ? ` · ${lesson.course.name}${lesson.course.section ? ` · ${lesson.course.section}` : ""}` : ""}
-                  {lesson.topic_name ? ` · ${lesson.topic_name}` : ""}
-                </p>
-                {lesson.attachments.length > 0 && (
-                  <p className="mt-2 text-xs text-zinc-500">{attachmentSummary(lesson.attachments)}</p>
-                )}
-              </Link>
-            </li>
-          ))}
+        <ul className="grid gap-4 sm:grid-cols-2">
+          {lessons.map((lesson) => {
+            const mine = lesson.owner_id === user.id;
+            const classLine = lesson.course
+              ? `${lesson.course.name}${lesson.course.section ? ` · ${lesson.course.section}` : ""}`
+              : "Class";
+            return (
+              <li key={lesson.id}>
+                <Link
+                  href={`/lesson/${lesson.id}`}
+                  className={`${card} flex h-full flex-col gap-3 p-5 transition-colors hover:border-brand`}
+                >
+                  <p className="text-xs font-bold uppercase tracking-wider text-brand">{classLine}</p>
+                  <h2 className="text-lg font-bold leading-snug">{lesson.title}</h2>
+                  <p className="flex flex-wrap items-center gap-2 text-sm text-muted">
+                    <span>{lesson.teacher?.name ?? lesson.teacher?.email ?? "A teacher"}</span>
+                    {mine && (
+                      <span className="rounded-full bg-accent px-2 py-0.5 text-xs font-bold text-ink">You</span>
+                    )}
+                    {lesson.topic_name && <span>· {lesson.topic_name}</span>}
+                  </p>
+                  {lesson.attachments.length > 0 && (
+                    <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
+                      {attachmentSummaryParts(lesson.attachments).map(({ label, count }) => (
+                        <FileChip key={label} label={label} count={count} />
+                      ))}
+                    </div>
+                  )}
+                </Link>
+              </li>
+            );
+          })}
         </ul>
 
         {lessons.length === 0 && (
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-muted">
             {q ? "Nothing matches. Try fewer words." : "No shared lessons yet. Teachers' lessons appear here after they sync."}
           </p>
         )}

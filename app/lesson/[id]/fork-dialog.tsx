@@ -1,7 +1,9 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { FileChip } from "@/components/file-chip";
 import { topicMatch, type TopicChoice } from "@/lib/fork/plan";
+import { alertError, btnPrimary, btnSecondary, input } from "@/lib/ui";
 
 export type ForkClass = { id: string; name: string; section: string | null; topics: string[] };
 export type ForkItem = {
@@ -12,12 +14,12 @@ export type ForkItem = {
   note: string;
 };
 
-type Done = { status: "done" | "partial"; className: string; alternateLink: string | null; notCopied: string[] };
+type Done = { status: "done" | "partial"; className: string; alternateLink: string; notCopied: string[] };
 
 const OUTCOME_STYLE = {
-  copy: "text-green-700",
-  "as-is": "text-zinc-500",
-  skip: "text-amber-700",
+  copy: "text-brand",
+  "as-is": "text-muted",
+  skip: "text-chip-slides-ink",
 } as const;
 
 export function ForkDialog({
@@ -34,7 +36,8 @@ export function ForkDialog({
   items: ForkItem[];
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [courseId, setCourseId] = useState(classes[0]?.id ?? "");
+  // No class is preselected: the teacher has to choose where the draft goes.
+  const [courseId, setCourseId] = useState("");
   const [override, setOverride] = useState<{ courseId: string; choice: TopicChoice } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,39 +67,42 @@ export function ForkDialog({
     }
   }
 
-  function close() {
-    dialog.current?.close();
+  function reset() {
     setDone(null);
     setError(null);
+    setCourseId("");
+    setOverride(null);
   }
+
+  const topicOptions: { value: TopicChoice; text: string }[] = lessonTopic
+    ? [
+        ...(match
+          ? [{ value: "existing" as const, text: `Topic “${match.name!.trim()}” (already in this class)` }]
+          : [{ value: "create" as const, text: `Create topic “${lessonTopic}”` }]),
+        { value: "none", text: "No topic" },
+      ]
+    : [];
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => dialog.current?.showModal()}
-        className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black"
-      >
+      <button type="button" onClick={() => dialog.current?.showModal()} className={btnPrimary}>
         Fork to my class
       </button>
 
       <dialog
         ref={dialog}
-        onClose={() => {
-          setDone(null);
-          setError(null);
-        }}
-        className="m-auto w-full max-w-lg rounded-xl border border-zinc-200 bg-white p-6 text-zinc-900 backdrop:bg-black/40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+        onClose={reset}
+        className="m-auto max-h-[90vh] w-[calc(100%-2.5rem)] max-w-lg overflow-auto rounded-card border border-line bg-white p-6 text-ink backdrop:bg-ink/50"
       >
         {done ? (
           <div className="flex flex-col gap-4">
-            <h2 className="text-lg font-semibold">Draft created in {done.className}</h2>
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            <h2 className="text-2xl font-bold">Draft created in {done.className}</h2>
+            <p className="text-muted">
               It&apos;s a draft with no due date. Students can&apos;t see it until you post it.
             </p>
             {done.notCopied.length > 0 && (
-              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-                <p className="font-medium">Please re-add:</p>
+              <div className="rounded-[10px] border border-accent bg-chip-slides p-3 text-sm text-chip-slides-ink">
+                <p className="font-semibold">Please re-add:</p>
                 <ul className="list-disc pl-5">
                   {done.notCopied.map((n) => (
                     <li key={n}>{n}</li>
@@ -104,40 +110,36 @@ export function ForkDialog({
                 </ul>
               </div>
             )}
-            <div className="flex gap-2">
-              {done.alternateLink && (
-                <a
-                  href={done.alternateLink}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black"
-                >
-                  Open in Classroom
-                </a>
-              )}
-              <button type="button" onClick={close} className="rounded-md border border-zinc-300 px-4 py-2 text-sm">
+            <div className="flex flex-wrap gap-2">
+              <a href={done.alternateLink} target="_blank" rel="noopener noreferrer" className={btnPrimary}>
+                Open in Classroom
+              </a>
+              <button type="button" onClick={() => dialog.current?.close()} className={btnSecondary}>
                 Close
               </button>
             </div>
           </div>
         ) : (
           <div className="flex flex-col gap-5">
-            <h2 className="text-lg font-semibold">Fork “{lessonTitle}”</h2>
+            <h2 className="text-2xl font-bold leading-tight">Fork “{lessonTitle}”</h2>
 
             {classes.length === 0 ? (
-              <p className="text-sm text-zinc-600">
+              <p className="text-muted">
                 Fork Lesson doesn&apos;t know your classes yet. Open My lessons and click “Sync and publish”, then come back.
               </p>
             ) : (
               <>
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="font-medium">Class</span>
+                <label className="flex flex-col gap-1.5 text-sm">
+                  <span className="font-semibold">Class</span>
                   <select
                     value={courseId}
                     onChange={(e) => setCourseId(e.target.value)}
                     disabled={busy}
-                    className="rounded-md border border-zinc-300 bg-transparent px-3 py-2"
+                    className={input}
                   >
+                    <option value="" disabled>
+                      Choose a class…
+                    </option>
                     {classes.map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}
@@ -147,18 +149,17 @@ export function ForkDialog({
                   </select>
                 </label>
 
-                <fieldset className="flex flex-col gap-2 text-sm" disabled={busy}>
-                  <legend className="mb-1 font-medium">Topic</legend>
-                  {lessonTopic ? (
-                    [
-                      ...(match ? [{ value: "existing" as const, text: `Topic “${match.name!.trim()}” (already in this class)` }] : []),
-                      ...(match ? [] : [{ value: "create" as const, text: `Create topic “${lessonTopic}”` }]),
-                      { value: "none" as const, text: "No topic" },
-                    ].map((option) => (
-                      <label key={option.value} className="flex items-center gap-2">
+                <fieldset className="flex flex-col text-sm" disabled={busy || !courseId}>
+                  <legend className="mb-1 font-semibold">Topic</legend>
+                  {!courseId ? (
+                    <p className="text-muted">Choose a class to see topic options.</p>
+                  ) : lessonTopic ? (
+                    topicOptions.map((option) => (
+                      <label key={option.value} className="flex min-h-11 items-center gap-3">
                         <input
                           type="radio"
                           name="topic"
+                          className="size-4 accent-brand"
                           checked={choice === option.value}
                           onChange={() => setOverride({ courseId, choice: option.value })}
                         />
@@ -166,23 +167,23 @@ export function ForkDialog({
                       </label>
                     ))
                   ) : (
-                    <p className="text-zinc-500">This lesson has no topic.</p>
+                    <p className="text-muted">This lesson has no topic.</p>
                   )}
                 </fieldset>
 
                 <div className="flex flex-col gap-2 text-sm">
-                  <p className="font-medium">What gets copied</p>
-                  <ul className="flex flex-col gap-1">
+                  <p className="font-semibold">What gets copied</p>
+                  <ul className="flex flex-col gap-2">
                     <li>Title, instructions and points</li>
                     {items.map((item) => (
-                      <li key={item.key}>
-                        <span className="mr-2 rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-medium dark:bg-zinc-800">{item.label}</span>
-                        {item.title}{" "}
+                      <li key={item.key} className="flex flex-wrap items-center gap-2">
+                        <FileChip label={item.label} />
+                        <span>{item.title}</span>
                         <span className={`text-xs ${OUTCOME_STYLE[item.outcome]}`}>{item.note}</span>
                       </li>
                     ))}
                   </ul>
-                  <p className="text-zinc-500">
+                  <p className="text-muted">
                     This creates a draft with no due date. Students won&apos;t see it until you post it.
                   </p>
                 </div>
@@ -190,23 +191,18 @@ export function ForkDialog({
             )}
 
             {error && (
-              <p role="alert" className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900">
+              <p role="alert" className={alertError}>
                 {error}
               </p>
             )}
 
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {classes.length > 0 && (
-                <button
-                  type="button"
-                  onClick={fork}
-                  disabled={busy || !courseId}
-                  className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-60 dark:bg-white dark:text-black"
-                >
+                <button type="button" onClick={fork} disabled={busy || !courseId} className={btnPrimary}>
                   {busy ? "Forking…" : "Create draft"}
                 </button>
               )}
-              <button type="button" onClick={close} disabled={busy} className="rounded-md border border-zinc-300 px-4 py-2 text-sm">
+              <button type="button" onClick={() => dialog.current?.close()} disabled={busy} className={btnSecondary}>
                 Cancel
               </button>
             </div>

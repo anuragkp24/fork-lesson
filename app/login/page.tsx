@@ -1,3 +1,5 @@
+import { Logo } from "@/components/logo";
+import { alertError, card } from "@/lib/ui";
 import { SignInButton } from "./sign-in-button";
 
 const MESSAGES: Record<string, string> = {
@@ -16,18 +18,26 @@ export default async function LoginPage({
   const message = MESSAGES[error ?? (reconnect ? "reconnect" : "")];
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-6 px-6 py-24">
-      <h1 className="text-3xl font-semibold tracking-tight">Fork Lesson</h1>
-      <p className="text-zinc-600 dark:text-zinc-400">
-        Share a Google Classroom lesson with the teachers in your school, or fork one of theirs into
-        your own class.
-      </p>
-      {message && (
-        <p role="alert" className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900">
-          {message}
-        </p>
-      )}
-      <SignInButton />
+    <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-6 px-5 py-16">
+      <div className="flex items-center gap-2.5">
+        <Logo size={36} />
+        <span className="font-heading text-xl font-bold tracking-tight">Fork Lesson</span>
+      </div>
+      <div className={`${card} flex flex-col gap-5 p-6`}>
+        <div className="flex flex-col gap-2">
+          <h1 className="text-3xl font-bold leading-tight">Don&apos;t rebuild a lesson a colleague already made.</h1>
+          <p className="text-muted">
+            Browse lessons from teachers in your district, then fork one into your own Google Classroom class as a
+            draft.
+          </p>
+        </div>
+        {message && (
+          <p role="alert" className={alertError}>
+            {message}
+          </p>
+        )}
+        <SignInButton />
+      </div>
     </main>
   );
 }

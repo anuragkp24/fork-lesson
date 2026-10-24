@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { SIGN_IN_SCOPES } from "@/lib/google/scopes";
 import { createClient } from "@/lib/supabase/client";
+import { btnPrimary } from "@/lib/ui";
 
 export function SignInButton() {
   const [busy, setBusy] = useState(false);
@@ -32,11 +33,11 @@ export function SignInButton() {
         type="button"
         onClick={signIn}
         disabled={busy}
-        className="rounded-md bg-black px-4 py-3 font-medium text-white disabled:opacity-60 dark:bg-white dark:text-black"
+        className={`${btnPrimary} w-full`}
       >
         {busy ? "Opening Google…" : "Sign in with Google"}
       </button>
-      {failed && <p className="text-sm text-red-700">Couldn&apos;t start sign-in. Please try again.</p>}
+      {failed && <p className="text-sm text-danger">Couldn&apos;t start sign-in. Please try again.</p>}
     </div>
   );
 }

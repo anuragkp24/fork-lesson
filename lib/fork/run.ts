@@ -5,6 +5,7 @@ import { describeFailure } from "@/lib/google/describe";
 import { copyWithFallback, createFolder, folderUsable, trashFile } from "@/lib/google/drive";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { createClient } from "@/lib/supabase/server";
+import { draftLink } from "./links";
 import {
   buildMaterials,
   describeNotCopied,
@@ -18,7 +19,7 @@ import {
 const FORKS_FOLDER_NAME = "Fork Lesson";
 
 export type ForkResult =
-  | { ok: true; status: "done" | "partial"; className: string; alternateLink: string | null; notCopied: string[] }
+  | { ok: true; status: "done" | "partial"; className: string; alternateLink: string; notCopied: string[] }
   | { ok: false; httpStatus: number; error: string };
 
 type LessonRow = {
@@ -177,7 +178,7 @@ export async function runFork(input: {
       ok: true,
       status,
       className: `${course.name}${course.section ? ` · ${course.section}` : ""}`,
-      alternateLink: created.alternateLink ?? null,
+      alternateLink: created.alternateLink ?? draftLink(course.google_course_id, created.id),
       notCopied: notCopied.map(describeNotCopied),
     };
   } catch (err) {

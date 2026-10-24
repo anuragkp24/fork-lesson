@@ -1,9 +1,11 @@
 import Link from "next/link";
-import { AppNav } from "@/components/app-nav";
+import { AppHeader } from "@/components/app-header";
+import { FileChip } from "@/components/file-chip";
 import { getAccessToken } from "@/lib/google/access-token";
-import { createClient, getUser } from "@/lib/supabase/server";
 import { driveOpenUrl } from "@/lib/library/links";
+import { createClient, getUser } from "@/lib/supabase/server";
 import { attachmentLabel } from "@/lib/sync/map";
+import { alertError, card } from "@/lib/ui";
 import { syncAction } from "./actions";
 import { SyncButton } from "./sync-button";
 
@@ -53,7 +55,7 @@ export default async function LessonsPage() {
   // The signed-in client, so row level security decides what comes back.
   const supabase = await createClient();
 
-  const [{ data: courses }, { data: sync }, { data: profile }, google] = await Promise.all([
+  const [{ data: courses }, { data: sync }, google] = await Promise.all([
     supabase
       .from("courses")
       .select(
@@ -63,122 +65,107 @@ export default async function LessonsPage() {
       .order("name")
       .returns<Course[]>(),
     supabase.from("sync_state").select("*").eq("user_id", user.id).maybeSingle(),
-    supabase.from("users").select("name, email, domain").eq("id", user.id).maybeSingle(),
     getAccessToken(user.id),
   ]);
 
   return (
     <>
-    <AppNav current="lessons" />
-    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-8 px-6 py-12">
-      <header className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">My lessons</h1>
-          <p className="text-sm text-zinc-500">
-            {sync?.last_finished_at
-              ? `Last synced ${new Date(sync.last_finished_at).toLocaleString()} · ${sync.courses_count ?? 0} classes, ${sync.lessons_count ?? 0} lessons · ${sync.published_count ?? 0} files in the library`
-              : "Not synced yet."}
-          </p>
+      <AppHeader current="lessons" />
+      <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-8 px-5 py-10">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="flex flex-col gap-1">
+            <h1 className="text-3xl font-bold">My lessons</h1>
+            <p className="text-sm text-muted">
+              {sync?.last_finished_at
+                ? `Last synced ${new Date(sync.last_finished_at).toLocaleString()} · ${sync.courses_count ?? 0} classes, ${sync.lessons_count ?? 0} lessons · ${sync.published_count ?? 0} files in the library`
+                : "Not synced yet. Sync to bring in your Classroom lessons and share them with your district."}
+            </p>
+          </div>
+          <form action={syncAction}>
+            <SyncButton />
+          </form>
         </div>
-        <form action={syncAction}>
-          <SyncButton />
-        </form>
-      </header>
 
-      {sync?.last_error && (
-        <p role="alert" className="rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900">
-          Sync problem: {sync.last_error}
-        </p>
-      )}
+        {sync?.last_error && (
+          <p role="alert" className={alertError}>
+            Sync problem: {sync.last_error}
+          </p>
+        )}
+        {google.status !== "ok" && (
+          <p role="alert" className={alertError}>
+            Google connection: {google.reason}. Sign out and sign in again.
+          </p>
+        )}
 
-      {(courses ?? []).map((course) => (
-        <section key={course.id} className="flex flex-col gap-4">
-          <h2 className="border-b border-zinc-200 pb-2 text-lg font-semibold dark:border-zinc-800">
-            {course.name}
-            {course.section ? ` · ${course.section}` : ""}
-          </h2>
-          {course.lessons.length === 0 && <p className="text-sm text-zinc-500">No lessons in this class.</p>}
-          {groupByTopic([...course.lessons].sort(newestFirst)).map(([topic, lessons]) => (
-            <div key={topic ?? "(none)"} className="flex flex-col gap-3">
-              <h3 className="text-sm font-medium uppercase tracking-wide text-zinc-500">{topic ?? "No topic"}</h3>
-              {lessons.map((lesson) => (
-                <article key={lesson.id} className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
-                  <h4 className="font-medium">
-                    <Link href={`/lesson/${lesson.id}`} className="hover:underline">
-                      {lesson.title}
-                    </Link>
-                  </h4>
-                  {lesson.description && (
-                    <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-                      {lesson.description.length > 160 ? `${lesson.description.slice(0, 160)}…` : lesson.description}
-                    </p>
-                  )}
-                  <ul className="mt-3 flex flex-col gap-1 text-sm">
-                    {[...lesson.attachments]
-                      .sort((a, b) => a.position - b.position)
-                      .map((att) => (
-                        <li key={att.id} className="flex items-baseline gap-2">
-                          <span className="w-14 shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-center text-xs font-medium dark:bg-zinc-800">
-                            {attachmentLabel(att)}
-                          </span>
-                          {att.url ? (
-                            <a href={att.url} target="_blank" rel="noopener noreferrer" className="underline">
-                              {att.title ?? att.url}
-                            </a>
-                          ) : (
-                            <span>{att.title ?? "(untitled)"}</span>
-                          )}
-                          {att.kind === "drive" &&
-                            (att.library_file_id ? (
-                              <a
-                                href={driveOpenUrl(att.library_file_id)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-xs text-green-700 underline"
-                              >
-                                In library
+        {(courses ?? []).map((course) => (
+          <section key={course.id} className="flex flex-col gap-4">
+            <h2 className="flex flex-wrap items-baseline gap-2 text-xl font-bold">
+              {course.name}
+              {course.section && <span className="text-base font-medium text-muted">{course.section}</span>}
+            </h2>
+            {course.lessons.length === 0 && <p className="text-sm text-muted">No lessons in this class.</p>}
+            {groupByTopic([...course.lessons].sort(newestFirst)).map(([topic, lessons]) => (
+              <div key={topic ?? "(none)"} className="flex flex-col gap-3">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-muted">{topic ?? "No topic"}</h3>
+                {lessons.map((lesson) => (
+                  <article key={lesson.id} className={`${card} p-5`}>
+                    <h4 className="text-lg font-bold">
+                      <Link href={`/lesson/${lesson.id}`} className="hover:text-brand hover:underline">
+                        {lesson.title}
+                      </Link>
+                    </h4>
+                    {lesson.description && (
+                      <p className="mt-1 text-sm text-muted">
+                        {lesson.description.length > 160 ? `${lesson.description.slice(0, 160)}…` : lesson.description}
+                      </p>
+                    )}
+                    <ul className="mt-4 flex flex-col gap-2 text-sm">
+                      {[...lesson.attachments]
+                        .sort((a, b) => a.position - b.position)
+                        .map((att) => (
+                          <li key={att.id} className="flex flex-wrap items-center gap-2">
+                            <FileChip label={attachmentLabel(att)} />
+                            {att.url ? (
+                              <a href={att.url} target="_blank" rel="noopener noreferrer" className="underline">
+                                {att.title ?? att.url}
                               </a>
-                            ) : att.publish_error ? (
-                              <span className="text-xs text-red-700">
-                                This file couldn&apos;t be shared ({att.publish_error})
-                              </span>
                             ) : (
-                              <span className="text-xs text-zinc-500">Not shared yet</span>
-                            ))}
-                          {att.kind === "unsupported" && (
-                            <span className="text-xs text-amber-700">Not copied. Re-add it after forking.</span>
-                          )}
-                        </li>
-                      ))}
-                  </ul>
-                </article>
-              ))}
-            </div>
-          ))}
-        </section>
-      ))}
+                              <span>{att.title ?? "(untitled)"}</span>
+                            )}
+                            {att.kind === "drive" &&
+                              (att.library_file_id ? (
+                                <a
+                                  href={driveOpenUrl(att.library_file_id)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="rounded-full bg-brand-light px-2.5 py-0.5 text-xs font-semibold text-brand"
+                                >
+                                  In library
+                                </a>
+                              ) : att.publish_error ? (
+                                <span className="rounded-full bg-danger-light px-2.5 py-0.5 text-xs font-semibold text-danger">
+                                  Couldn&apos;t be shared ({att.publish_error})
+                                </span>
+                              ) : (
+                                <span className="text-xs text-muted">Not shared yet</span>
+                              ))}
+                            {att.kind === "unsupported" && (
+                              <span className="text-xs text-chip-slides-ink">Not copied. Re-add it after forking.</span>
+                            )}
+                          </li>
+                        ))}
+                    </ul>
+                  </article>
+                ))}
+              </div>
+            ))}
+          </section>
+        ))}
 
-      {courses?.length === 0 && sync?.last_finished_at && !sync.last_error && (
-        <p className="text-sm text-zinc-500">No active classes found where you are a teacher.</p>
-      )}
-
-      <details className="text-sm">
-        <summary className="cursor-pointer text-zinc-500">Account and connection</summary>
-        <dl className="mt-3 grid grid-cols-[10rem_1fr] gap-y-2">
-          <dt className="text-zinc-500">Signed in as</dt>
-          <dd>{profile?.name ?? "(no name)"} · {profile?.email ?? user.email}</dd>
-          <dt className="text-zinc-500">Sharing domain</dt>
-          <dd>{profile?.domain ?? "not saved"}</dd>
-          <dt className="text-zinc-500">Google connection</dt>
-          <dd>{google.status === "ok" ? "working" : `${google.status}: ${google.reason}`}</dd>
-        </dl>
-        <form action="/auth/signout" method="post" className="mt-4">
-          <button type="submit" className="rounded-md border border-zinc-300 px-3 py-2 text-sm">
-            Sign out
-          </button>
-        </form>
-      </details>
-    </main>
+        {courses?.length === 0 && sync?.last_finished_at && !sync.last_error && (
+          <p className="text-sm text-muted">No active classes found where you are a teacher.</p>
+        )}
+      </main>
     </>
   );
 }

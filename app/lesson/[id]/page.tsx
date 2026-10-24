@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { AppNav } from "@/components/app-nav";
+import { AppHeader } from "@/components/app-header";
+import { FileChip } from "@/components/file-chip";
 import { driveOpenUrl } from "@/lib/library/links";
 import { createClient, getUser } from "@/lib/supabase/server";
 import { attachmentLabel } from "@/lib/sync/map";
+import { card } from "@/lib/ui";
 import { ForkDialog, type ForkClass, type ForkItem } from "./fork-dialog";
 
 type LessonDetail = {
@@ -68,82 +70,82 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
     return { ...base, outcome: "as-is", note: "Added as is" };
   });
 
+  const classLine = lesson.course
+    ? `${lesson.course.name}${lesson.course.section ? ` · ${lesson.course.section}` : ""}`
+    : "Class";
+
   return (
     <>
-      <AppNav current={isOwner ? "lessons" : "library"} />
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-10">
-        <Link href={isOwner ? "/lessons" : "/library"} className="text-sm text-zinc-500 underline">
+      <AppHeader current={isOwner ? "lessons" : "library"} />
+      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-5 py-10">
+        <Link
+          href={isOwner ? "/lessons" : "/library"}
+          className="inline-flex min-h-11 items-center text-sm font-semibold text-brand hover:underline"
+        >
           ← {isOwner ? "My lessons" : "Library"}
         </Link>
 
-        <header className="flex flex-col gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight">{lesson.title}</h1>
-          <dl className="grid grid-cols-[6rem_1fr] gap-y-1 text-sm">
-            <dt className="text-zinc-500">Teacher</dt>
-            <dd>{isOwner ? "You" : (lesson.teacher?.name ?? lesson.teacher?.email ?? "A teacher")}</dd>
-            <dt className="text-zinc-500">Class</dt>
-            <dd>
-              {lesson.course ? `${lesson.course.name}${lesson.course.section ? ` · ${lesson.course.section}` : ""}` : "—"}
-            </dd>
-            <dt className="text-zinc-500">Topic</dt>
-            <dd>{lesson.topic_name ?? "No topic"}</dd>
-          </dl>
+        <header className={`${card} flex flex-col gap-4 p-6`}>
+          <p className="text-xs font-bold uppercase tracking-wider text-brand">{classLine}</p>
+          <h1 className="text-3xl font-bold leading-tight">{lesson.title}</h1>
+          <p className="flex flex-wrap items-center gap-2 text-sm text-muted">
+            <span>{lesson.teacher?.name ?? lesson.teacher?.email ?? "A teacher"}</span>
+            {isOwner && <span className="rounded-full bg-accent px-2 py-0.5 text-xs font-bold text-ink">You</span>}
+            <span>· {lesson.topic_name ?? "No topic"}</span>
+          </p>
+          {!isOwner && (
+            <div>
+              <ForkDialog
+                lessonId={lesson.id}
+                lessonTitle={lesson.title}
+                lessonTopic={lesson.topic_name}
+                classes={classes}
+                items={forkItems}
+              />
+            </div>
+          )}
         </header>
 
-        <section className="flex flex-col gap-2">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">Instructions</h2>
+        <section className={`${card} flex flex-col gap-3 p-6`}>
+          <h2 className="text-lg font-bold">Instructions</h2>
           {lesson.description ? (
-            <p className="whitespace-pre-wrap text-sm leading-6">{lesson.description}</p>
+            <p className="whitespace-pre-wrap leading-7">{lesson.description}</p>
           ) : (
-            <p className="text-sm text-zinc-500">No instructions.</p>
+            <p className="text-muted">No instructions.</p>
           )}
         </section>
 
-        <section className="flex flex-col gap-2">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-zinc-500">Attachments</h2>
-          {attachments.length === 0 && <p className="text-sm text-zinc-500">No attachments.</p>}
-          <ul className="flex flex-col gap-2 text-sm">
+        <section className={`${card} flex flex-col gap-3 p-6`}>
+          <h2 className="text-lg font-bold">Attachments</h2>
+          {attachments.length === 0 && <p className="text-muted">No attachments.</p>}
+          <ul className="flex flex-col gap-3">
             {attachments.map((att) => {
-              // Drive files: everyone opens the library copy; the owner's own
-              // original is reachable from My lessons.
-              const href = att.kind === "drive" ? (att.library_file_id ? driveOpenUrl(att.library_file_id) : null) : att.url;
+              // Drive files: everyone opens the library copy.
+              const href =
+                att.kind === "drive" ? (att.library_file_id ? driveOpenUrl(att.library_file_id) : null) : att.url;
               return (
-                <li key={att.id} className="flex flex-wrap items-baseline gap-2">
-                  <span className="w-14 shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-center text-xs font-medium dark:bg-zinc-800">
-                    {attachmentLabel(att)}
-                  </span>
+                <li key={att.id} className="flex flex-wrap items-center gap-2">
+                  <FileChip label={attachmentLabel(att)} />
                   {href ? (
-                    <a href={href} target="_blank" rel="noopener noreferrer" className="underline">
+                    <a href={href} target="_blank" rel="noopener noreferrer" className="font-medium underline">
                       {att.title ?? href}
                     </a>
                   ) : (
-                    <span>{att.title ?? "(untitled)"}</span>
+                    <span className="font-medium">{att.title ?? "(untitled)"}</span>
                   )}
                   {att.kind === "drive" && !att.library_file_id && (
-                    <span className="text-xs text-red-700">
+                    <span className="text-sm text-danger">
                       {att.publish_error ? "This file couldn't be shared." : "Not shared yet."}
                     </span>
                   )}
                   {att.kind === "unsupported" && (
-                    <span className="text-xs text-amber-700">Not copied. Re-add it after forking.</span>
+                    <span className="text-sm text-chip-slides-ink">Not copied. Re-add it after forking.</span>
                   )}
                 </li>
               );
             })}
           </ul>
         </section>
-
-        {!isOwner && (
-          <div>
-            <ForkDialog
-              lessonId={lesson.id}
-              lessonTitle={lesson.title}
-              lessonTopic={lesson.topic_name}
-              classes={classes}
-              items={forkItems}
-            />
-          </div>
-        )}
       </main>
     </>
   );
