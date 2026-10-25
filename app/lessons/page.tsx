@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { AppHeader } from "@/components/app-header";
+import { ForkBadge } from "@/components/fork-badge";
 import { FileChip } from "@/components/file-chip";
 import { getAccessToken } from "@/lib/google/access-token";
+import { myForkStatus } from "@/lib/library/forks";
 import { driveOpenUrl } from "@/lib/library/links";
 import { createClient, getUser } from "@/lib/supabase/server";
 import { attachmentLabel } from "@/lib/sync/map";
@@ -29,6 +31,7 @@ type Lesson = {
   source_updated_at: string | null;
   kind: string;
   classroom_state: string | null;
+  forked_from_lesson_id: string | null;
   attachments: Attachment[];
 };
 
@@ -61,7 +64,7 @@ export default async function LessonsPage() {
     supabase
       .from("courses")
       .select(
-        "id, name, section, lessons(id, title, description, topic_name, source_updated_at, kind, classroom_state, attachments(id, position, kind, title, url, mime_type, unsupported_type, library_file_id, publish_error))"
+        "id, name, section, lessons(id, title, description, topic_name, source_updated_at, kind, classroom_state, forked_from_lesson_id, attachments(id, position, kind, title, url, mime_type, unsupported_type, library_file_id, publish_error))"
       )
       .eq("owner_id", user.id)
       .order("name")
@@ -69,6 +72,24 @@ export default async function LessonsPage() {
     supabase.from("sync_state").select("*").eq("user_id", user.id).maybeSingle(),
     getAccessToken(user.id),
   ]);
+
+  // Who made the original of each fork, for the "Forked from" badge. Anything
+  // that isn't visible to me (deleted, unshared) simply has no entry.
+  const originalIds = [
+    ...new Set(
+      (courses ?? []).flatMap((c) => c.lessons.map((l) => l.forked_from_lesson_id).filter((id): id is string => !!id))
+    ),
+  ];
+  const { data: originals } = originalIds.length
+    ? await supabase
+        .from("lessons")
+        .select("id, teacher:users(name, email)")
+        .in("id", originalIds)
+        .returns<{ id: string; teacher: { name: string | null; email: string } | null }[]>()
+    : { data: [] };
+  const originalTeacher = new Map(
+    (originals ?? []).map((o) => [o.id, o.teacher?.name ?? o.teacher?.email ?? null])
+  );
 
   return (
     <>
@@ -112,16 +133,35 @@ export default async function LessonsPage() {
                 {lessons.map((lesson) => (
                   <article key={lesson.id} className={`${card} p-5`}>
                     <h4 className="text-lg font-bold">
-                      <Link href={`/lesson/${lesson.id}`} className="hover:text-brand hover:underline">
-                        {lesson.title}
-                      </Link>
+                      {/* A fork has no page of its own: the original lesson is the hub. */}
+                      {lesson.kind === "fork" && !originalTeacher.has(lesson.forked_from_lesson_id ?? "") ? (
+                        lesson.title
+                      ) : (
+                        <Link
+                          href={`/lesson/${lesson.kind === "fork" ? lesson.forked_from_lesson_id : lesson.id}`}
+                          className="hover:text-brand hover:underline"
+                        >
+                          {lesson.title}
+                        </Link>
+                      )}
                     </h4>
                     {lesson.kind === "fork" && (
-                      <p className="mt-1">
-                        <span className="rounded-full bg-brand-light px-2.5 py-0.5 text-xs font-semibold text-brand">
-                          Forked lesson
-                          {lesson.classroom_state === "DRAFT" ? " · Draft" : lesson.classroom_state === "PUBLISHED" ? " · Assigned" : ""}
-                        </span>
+                      <p className="mt-2 flex flex-wrap items-center gap-2">
+                        <ForkBadge
+                          originalId={lesson.forked_from_lesson_id}
+                          teacher={originalTeacher.get(lesson.forked_from_lesson_id ?? "") ?? null}
+                        />
+                        {myForkStatus(lesson.classroom_state) && (
+                          <span
+                            className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                              lesson.classroom_state === "PUBLISHED"
+                                ? "bg-chip-sheet text-chip-sheet-ink"
+                                : "bg-chip-slides text-chip-slides-ink"
+                            }`}
+                          >
+                            {myForkStatus(lesson.classroom_state)}
+                          </span>
+                        )}
                       </p>
                     )}
                     {lesson.description && (

@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { AppHeader } from "@/components/app-header";
+import { ForkIcon } from "@/components/fork-icon";
 import { FileChip } from "@/components/file-chip";
 import { initials } from "@/lib/initials";
+import { forkedLabel } from "@/lib/library/forks";
 import { groupByTeacher, teacherOptions } from "@/lib/library/group";
 import { attachmentSummaryParts, matchesQuery } from "@/lib/library/search";
 import { createClient, getUser } from "@/lib/supabase/server";
@@ -38,6 +40,13 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
     .returns<LibraryLesson[]>();
 
   const all = data ?? [];
+
+  // "Forked N times" per original lesson. If this lookup fails the cards just
+  // show no count.
+  const { data: counts } = await supabase.rpc("lesson_fork_counts", { ids: all.map((l) => l.id) });
+  const forkCount = new Map<string, number>(
+    ((counts ?? []) as { lesson_id: string; forks: number }[]).map((c) => [c.lesson_id, c.forks])
+  );
   const options = teacherOptions(all, user.id);
   const lessons = all.filter(
     (l) =>
@@ -126,11 +135,18 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
                             )}
                             {lesson.topic_name && <span>· {lesson.topic_name}</span>}
                           </p>
-                          {lesson.attachments.length > 0 && (
-                            <div className="mt-auto flex flex-wrap gap-1.5 pt-1">
-                              {attachmentSummaryParts(lesson.attachments).map(({ label, count }) => (
-                                <FileChip key={label} label={label} count={count} />
-                              ))}
+                          {(lesson.attachments.length > 0 || forkedLabel(forkCount.get(lesson.id) ?? 0)) && (
+                            <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-1">
+                              <div className="flex flex-wrap gap-1.5">
+                                {attachmentSummaryParts(lesson.attachments).map(({ label, count }) => (
+                                  <FileChip key={label} label={label} count={count} />
+                                ))}
+                              </div>
+                              {forkedLabel(forkCount.get(lesson.id) ?? 0) && (
+                                <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand">
+                                  <ForkIcon /> {forkedLabel(forkCount.get(lesson.id) ?? 0)}
+                                </span>
+                              )}
                             </div>
                           )}
                         </Link>
