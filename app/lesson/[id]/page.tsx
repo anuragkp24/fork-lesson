@@ -3,9 +3,10 @@ import { notFound, redirect } from "next/navigation";
 import { AppHeader } from "@/components/app-header";
 import { FileChip } from "@/components/file-chip";
 import { ForkIcon } from "@/components/fork-icon";
+import { YouTag } from "@/components/you-tag";
 import { forkStatusLabel, forkedLabel, hubTarget } from "@/lib/library/forks";
 import { initials } from "@/lib/initials";
-import { driveOpenUrl } from "@/lib/library/links";
+import { drivePreviewUrl } from "@/lib/library/links";
 import { createClient, getUser } from "@/lib/supabase/server";
 import { attachmentLabel } from "@/lib/sync/map";
 import { card } from "@/lib/ui";
@@ -112,7 +113,7 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
           <h1 className="text-3xl font-bold leading-tight">{lesson.title}</h1>
           <p className="flex flex-wrap items-center gap-2 text-sm text-muted">
             <span>{lesson.teacher?.name ?? lesson.teacher?.email ?? "A teacher"}</span>
-            {isOwner && <span className="rounded-full bg-accent px-2 py-0.5 text-xs font-bold text-ink">You</span>}
+            {isOwner && <YouTag />}
             <span>· {lesson.topic_name ?? "No topic"}</span>
             {forkedLabel(forkedBy.length) && (
               <span className="inline-flex items-center gap-1.5 font-semibold text-brand">
@@ -147,9 +148,13 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
           {attachments.length === 0 && <p className="text-muted">No attachments.</p>}
           <ul className="flex flex-col gap-3">
             {attachments.map((att) => {
-              // Drive files: everyone opens the library copy.
+              // Drive files: everyone opens the library copy, read-only.
               const href =
-                att.kind === "drive" ? (att.library_file_id ? driveOpenUrl(att.library_file_id) : null) : att.url;
+                att.kind === "drive"
+                  ? att.library_file_id
+                    ? drivePreviewUrl(att.library_file_id, att.mime_type)
+                    : null
+                  : att.url;
               return (
                 <li key={att.id} className="flex flex-wrap items-center gap-2">
                   <FileChip label={attachmentLabel(att)} />
@@ -191,11 +196,9 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
                       {initials(fork.forker_name, null)}
                     </span>
                     <div className="flex flex-col">
-                      <span className="font-semibold">
-                        {fork.forker_name}
-                        {fork.forker_id === user.id && (
-                          <span className="ml-2 rounded-full bg-accent px-2 py-0.5 text-xs font-bold text-ink">You</span>
-                        )}
+                      <span className="flex items-center gap-2 font-semibold">
+                        <span>{fork.forker_name}</span>
+                        {fork.forker_id === user.id && <YouTag />}
                       </span>
                       <span className="text-sm text-muted">
                         {fork.class_name}

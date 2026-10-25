@@ -2,7 +2,7 @@
 
 Replaces section 8 step 3 ("Teacher versions") of `fork-lineage.md`. Steps 1 and 2 of that plan are built and committed (4d93b5a, 2021d93).
 
-Status: plan agreed (questions answered below). Nothing here is built.
+Status: H1 built (local, not pushed). H2 to H6 are plan only.
 
 **Principle.** Things that happen automatically are private. Things a teacher deliberately writes can be public. No student data, ever.
 

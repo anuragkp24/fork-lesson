@@ -17,7 +17,7 @@ export async function AppHeader({ current }: { current: "lessons" | "library" | 
     }`;
 
   return (
-    <header className="border-b border-line bg-white">
+    <header className="sticky top-0 z-30 border-b border-line bg-white">
       <div className="mx-auto flex w-full max-w-4xl items-center gap-6 px-5">
         <Link href="/library" className="flex items-center gap-2.5 py-3">
           <Logo />

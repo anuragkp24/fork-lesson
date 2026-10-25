@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AppHeader } from "@/components/app-header";
 import { ForkIcon } from "@/components/fork-icon";
+import { YouTag } from "@/components/you-tag";
 import { FileChip } from "@/components/file-chip";
 import { initials } from "@/lib/initials";
 import { forkedLabel } from "@/lib/library/forks";
@@ -130,9 +131,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
                           <h4 className="text-lg font-bold leading-snug">{lesson.title}</h4>
                           <p className="flex flex-wrap items-center gap-2 text-sm text-muted">
                             <span>{lesson.teacher?.name ?? lesson.teacher?.email ?? "A teacher"}</span>
-                            {mine && (
-                              <span className="rounded-full bg-accent px-2 py-0.5 text-xs font-bold text-ink">You</span>
-                            )}
+                            {mine && <YouTag />}
                             {lesson.topic_name && <span>· {lesson.topic_name}</span>}
                           </p>
                           {(lesson.attachments.length > 0 || forkedLabel(forkCount.get(lesson.id) ?? 0)) && (
