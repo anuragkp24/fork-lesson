@@ -5,7 +5,8 @@ import { FileChip } from "@/components/file-chip";
 import { ForkIcon } from "@/components/fork-icon";
 import { YouTag } from "@/components/you-tag";
 import { forkStatusLabel, forkedLabel, hubSection, hubTarget, taughtLabel } from "@/lib/library/forks";
-import { initials } from "@/lib/initials";
+import { tagLabel } from "@/lib/hub/tags";
+import { firstName, initials } from "@/lib/initials";
 import { drivePreviewUrl } from "@/lib/library/links";
 import { createClient, getUser } from "@/lib/supabase/server";
 import { attachmentLabel } from "@/lib/sync/map";
@@ -70,6 +71,8 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
     section: string | null;
     created_at: string;
     state: string | null;
+    shoutout_tags: string[] | null;
+    shoutout_note: string | null;
   }[];
 
   const isOwner = lesson.owner_id === user.id;
@@ -136,6 +139,7 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
                 lessonId={lesson.id}
                 lessonTitle={lesson.title}
                 lessonTopic={lesson.topic_name}
+                authorName={firstName(lesson.teacher?.name) ?? "the author"}
                 classes={classes}
                 items={forkItems}
               />
@@ -200,8 +204,9 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
                 {forks.map((fork) => {
                   // The author never sees a forker's Draft / Assigned.
                   const status = section === "your-fork" ? forkStatusLabel(fork.state) : null;
+                  const tagLabels = (fork.shoutout_tags ?? []).flatMap((key) => tagLabel(key) ?? []);
                   return (
-                    <li key={fork.fork_id} className="flex flex-wrap items-center gap-3">
+                    <li key={fork.fork_id} className="flex flex-wrap items-start gap-3">
                       <span
                         className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-light text-xs font-bold text-brand"
                         aria-hidden="true"
@@ -222,6 +227,23 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
                             year: "numeric",
                           })}
                         </span>
+                        {tagLabels.length > 0 && (
+                          <span className="mt-1.5 flex flex-wrap gap-1.5">
+                            {tagLabels.map((label) => (
+                              <span
+                                key={label}
+                                className="rounded-full bg-brand-light px-2.5 py-0.5 text-xs font-semibold text-brand"
+                              >
+                                {label}
+                              </span>
+                            ))}
+                          </span>
+                        )}
+                        {fork.shoutout_note && (
+                          <blockquote className="mt-1.5 border-l-2 border-brand pl-3 text-sm italic">
+                            “{fork.shoutout_note}”
+                          </blockquote>
+                        )}
                       </div>
                       {status && (
                         <span

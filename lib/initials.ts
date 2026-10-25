@@ -5,3 +5,8 @@ export function initials(name: string | null | undefined, email: string | null |
   if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
   return (email ?? "?").slice(0, 2).toUpperCase();
 }
+
+// "Sofia" from "Sofia Marchetti"; null when there is no name.
+export function firstName(name: string | null | undefined): string | null {
+  return (name ?? "").trim().split(/\s+/)[0] || null;
+}

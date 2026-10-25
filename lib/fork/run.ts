@@ -19,7 +19,14 @@ import {
 const FORKS_FOLDER_NAME = "Fork Lesson";
 
 export type ForkResult =
-  | { ok: true; status: "done" | "partial"; className: string; alternateLink: string; notCopied: string[] }
+  | {
+      ok: true;
+      forkId: string;
+      status: "done" | "partial";
+      className: string;
+      alternateLink: string;
+      notCopied: string[];
+    }
   | { ok: false; httpStatus: number; error: string };
 
 type LessonRow = {
@@ -184,6 +191,7 @@ export async function runFork(input: {
 
     return {
       ok: true,
+      forkId: fork.id,
       status,
       className: `${course.name}${course.section ? ` · ${course.section}` : ""}`,
       alternateLink: classworkLink(course.google_course_id),
