@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { forkStatusLabel, forkedLabel, hubTarget, myForkStatus } from "../forks";
+import { forkStatusLabel, forkedLabel, hubSection, hubTarget, myForkStatus, taughtLabel } from "../forks";
 
 describe("forkedLabel", () => {
   it("pluralizes and hides zero", () => {
@@ -33,5 +33,31 @@ describe("myForkStatus", () => {
     expect(myForkStatus("PUBLISHED")).toBe("Assigned");
     expect(myForkStatus("DRAFT")).toBe("Draft");
     expect(myForkStatus(null)).toBeNull();
+  });
+});
+
+describe("taughtLabel", () => {
+  it("pluralizes and hides zero or a hidden count", () => {
+    expect(taughtLabel(1)).toBe("Taught in 1 class");
+    expect(taughtLabel(3)).toBe("Taught in 3 classes");
+    expect(taughtLabel(0)).toBeNull();
+    expect(taughtLabel(null)).toBeNull();
+    expect(taughtLabel(undefined)).toBeNull();
+  });
+});
+
+describe("hubSection", () => {
+  it("shows the author Forked by, even before anyone forks", () => {
+    expect(hubSection({ isOwner: true, forkCount: 2 })).toBe("forked-by");
+    expect(hubSection({ isOwner: true, forkCount: 0 })).toBe("forked-by");
+  });
+
+  it("shows a forker their own forks, including two of the same lesson", () => {
+    expect(hubSection({ isOwner: false, forkCount: 1 })).toBe("your-fork");
+    expect(hubSection({ isOwner: false, forkCount: 2 })).toBe("your-fork");
+  });
+
+  it("shows a bystander nothing", () => {
+    expect(hubSection({ isOwner: false, forkCount: 0 })).toBeNull();
   });
 });

@@ -2,7 +2,7 @@
 
 Replaces section 8 step 3 ("Teacher versions") of `fork-lineage.md`. Steps 1 and 2 of that plan are built and committed (4d93b5a, 2021d93).
 
-Status: H1 built (local, not pushed). H2 to H6 are plan only.
+Status: H1 and H2 built (local, not pushed; 0004 applied Oct 25). H3 to H6 are plan only.
 
 **Principle.** Things that happen automatically are private. Things a teacher deliberately writes can be public. No student data, ever.
 
@@ -44,6 +44,7 @@ Every step ends with `npm test` and `npm run lint` passing, a local preview, and
    - Anything else (PDF, image, Drawing…): `drive.google.com/file/d/<id>/view`
 
    The lesson page uses it for every viewer. My lessons keeps `driveOpenUrl`, since those are the teacher's own files and she may want to edit them.
+4. **Safari check (later, not built).** Oct 25: H1 verified in Chrome, but in Safari it doesn't work for Henry, even after a hard reload. Find out which part fails there (sticky header, Drive preview links, or "You" spacing; likely the Drive previews, which depend on Safari's third-party cookie blocking) and fix it in a later polish pass.
 
 **Tests.** `drivePreviewUrl` for each mime type, an unknown type, and an id that needs encoding.
 
@@ -69,9 +70,9 @@ Every step ends with `npm test` and `npm run lint` passing, a local preview, and
 **App.**
 - Lesson page header shows "Forked N times" from `lesson_fork_counts`, **not** `forkedBy.length` (which is now 0 for most viewers). The author also sees "· Taught in N classes" (hidden at 0).
 - **Forked by** section: the author sees the full list without status chips. A forker sees a **Your fork** section with their own row and its status. Everyone else sees no section.
-- Pure helpers in `lib/library/forks.ts`: `taughtLabel(n)` ("Taught in 1 class" / "Taught in 3 classes" / null at 0) and `hubSections({ isOwner, myForks })` choosing which section renders.
+- Pure helpers in `lib/library/forks.ts`: `taughtLabel(n)` ("Taught in 1 class" / "Taught in 3 classes" / null at 0) and `hubSection({ isOwner, forkCount })` choosing which section renders.
 
-**Tests.** `taughtLabel`; `hubSections` for author, forker, bystander, and a forker with two forks of the same lesson.
+**Tests.** `taughtLabel`; `hubSection` for author, forker, bystander, and a forker with two forks of the same lesson.
 
 **SQL checks** (paste into the Supabase SQL editor; replace the ids). This proves the rule holds even if the page were wrong:
 ```sql
@@ -241,7 +242,7 @@ The old Step 3, adjusted to the principle: sharing is a deliberate act, so a sha
 
 **My lessons.** A fork with changes shows **Share your version**; a shared one shows "Shared as a teacher version" and **Stop sharing**.
 
-**Tests.** From the old plan: `stripForkNote`, `computeChanges` (identical, title, instructions with and without our note, attachment added / removed / renamed, file `modifiedTime` changed, legacy baseline, original edited later), `summarizeChanges`, `canShareVersion`. New: version-author branch of `hubSections`.
+**Tests.** From the old plan: `stripForkNote`, `computeChanges` (identical, title, instructions with and without our note, attachment added / removed / renamed, file `modifiedTime` changed, legacy baseline, original edited later), `summarizeChanges`, `canShareVersion`. New: version-author branch of `hubSection`.
 
 **Check.**
 1. **Carlos** edits the instructions of his fork in Classroom, then clicks **Sync and publish**. His card shows **Share your version**. Henry's unedited fork shows nothing.

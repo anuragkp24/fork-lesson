@@ -24,3 +24,20 @@ export function myForkStatus(classroomState: string | null): "Assigned" | "Draft
   if (classroomState === "DRAFT") return "Draft";
   return null;
 }
+
+// "Taught in 1 class" / "Taught in 3 classes"; null at 0, or when the caller
+// isn't the author (the database returns null then).
+export function taughtLabel(count: number | null | undefined): string | null {
+  if (!count || count < 1) return null;
+  return `Taught in ${count} ${count === 1 ? "class" : "classes"}`;
+}
+
+// Which fork section the lesson page shows. The database already limits the
+// rows: the author gets every fork, a forker only their own, anyone else none.
+export function hubSection({ isOwner, forkCount }: { isOwner: boolean; forkCount: number }):
+  | "forked-by"
+  | "your-fork"
+  | null {
+  if (isOwner) return "forked-by";
+  return forkCount > 0 ? "your-fork" : null;
+}

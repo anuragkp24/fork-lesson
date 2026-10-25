@@ -4,7 +4,7 @@ import { AppHeader } from "@/components/app-header";
 import { FileChip } from "@/components/file-chip";
 import { ForkIcon } from "@/components/fork-icon";
 import { YouTag } from "@/components/you-tag";
-import { forkStatusLabel, forkedLabel, hubTarget } from "@/lib/library/forks";
+import { forkStatusLabel, forkedLabel, hubSection, hubTarget, taughtLabel } from "@/lib/library/forks";
 import { initials } from "@/lib/initials";
 import { drivePreviewUrl } from "@/lib/library/links";
 import { createClient, getUser } from "@/lib/supabase/server";
@@ -54,10 +54,15 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
   const hub = hubTarget(lesson);
   if (hub) redirect(`/lesson/${hub}`);
 
-  // Who forked this lesson. The database decides what each viewer may see,
-  // including that only a forker ever sees their own Draft.
-  const { data: forkRows } = await supabase.rpc("lesson_forks", { p_lesson: lesson.id });
-  const forkedBy = (forkRows ?? []) as {
+  // The database decides what each viewer may see: the author gets every fork
+  // (no status) and "taught", a forker only their own forks with status,
+  // anyone else only the count.
+  const [{ data: forkRows }, { data: countRows }] = await Promise.all([
+    supabase.rpc("lesson_forks", { p_lesson: lesson.id }),
+    supabase.rpc("lesson_fork_counts", { ids: [lesson.id] }),
+  ]);
+  const counts = ((countRows ?? []) as { forks: number; taught: number | null }[])[0];
+  const forks = (forkRows ?? []) as {
     fork_id: string;
     forker_id: string;
     forker_name: string;
@@ -68,6 +73,9 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
   }[];
 
   const isOwner = lesson.owner_id === user.id;
+  const section = hubSection({ isOwner, forkCount: forks.length });
+  const forked = forkedLabel(counts?.forks ?? 0);
+  const taught = isOwner ? taughtLabel(counts?.taught) : null;
   const attachments = [...lesson.attachments].sort((a, b) => a.position - b.position);
 
   // Only a non-owner forks, into one of their own classes.
@@ -115,11 +123,12 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
             <span>{lesson.teacher?.name ?? lesson.teacher?.email ?? "A teacher"}</span>
             {isOwner && <YouTag />}
             <span>· {lesson.topic_name ?? "No topic"}</span>
-            {forkedLabel(forkedBy.length) && (
+            {forked && (
               <span className="inline-flex items-center gap-1.5 font-semibold text-brand">
-                · <ForkIcon /> {forkedLabel(forkedBy.length)}
+                · <ForkIcon /> {forked}
               </span>
             )}
+            {taught && <span>· {taught}</span>}
           </p>
           {!isOwner && (
             <div>
@@ -179,54 +188,59 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
           </ul>
         </section>
 
-        <section className={`${card} flex flex-col gap-3 p-6`}>
-          <h2 className="text-lg font-bold">Forked by</h2>
-          {forkedBy.length === 0 ? (
-            <p className="text-muted">Nobody has forked this yet.</p>
-          ) : (
-            <ul className="flex flex-col gap-3">
-              {forkedBy.map((fork) => {
-                const status = forkStatusLabel(fork.state);
-                return (
-                  <li key={fork.fork_id} className="flex flex-wrap items-center gap-3">
-                    <span
-                      className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-light text-xs font-bold text-brand"
-                      aria-hidden="true"
-                    >
-                      {initials(fork.forker_name, null)}
-                    </span>
-                    <div className="flex flex-col">
-                      <span className="flex items-center gap-2 font-semibold">
-                        <span>{fork.forker_name}</span>
-                        {fork.forker_id === user.id && <YouTag />}
-                      </span>
-                      <span className="text-sm text-muted">
-                        {fork.class_name}
-                        {fork.section ? ` · ${fork.section}` : ""} ·{" "}
-                        {new Date(fork.created_at).toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                        })}
-                      </span>
-                    </div>
-                    {status && (
+        {section && (
+          <section className={`${card} flex flex-col gap-3 p-6`}>
+            <h2 className="text-lg font-bold">
+              {section === "forked-by" ? "Forked by" : forks.length === 1 ? "Your fork" : "Your forks"}
+            </h2>
+            {forks.length === 0 ? (
+              <p className="text-muted">Nobody has forked this yet.</p>
+            ) : (
+              <ul className="flex flex-col gap-3">
+                {forks.map((fork) => {
+                  // The author never sees a forker's Draft / Assigned.
+                  const status = section === "your-fork" ? forkStatusLabel(fork.state) : null;
+                  return (
+                    <li key={fork.fork_id} className="flex flex-wrap items-center gap-3">
                       <span
-                        className={`ml-auto rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                          status === "Assigned"
-                            ? "bg-chip-sheet text-chip-sheet-ink"
-                            : "bg-chip-slides text-chip-slides-ink"
-                        }`}
+                        className="flex size-9 shrink-0 items-center justify-center rounded-full bg-brand-light text-xs font-bold text-brand"
+                        aria-hidden="true"
                       >
-                        {status}
+                        {initials(fork.forker_name, null)}
                       </span>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
+                      <div className="flex flex-col">
+                        <span className="flex items-center gap-2 font-semibold">
+                          <span>{fork.forker_name}</span>
+                          {fork.forker_id === user.id && <YouTag />}
+                        </span>
+                        <span className="text-sm text-muted">
+                          {fork.class_name}
+                          {fork.section ? ` · ${fork.section}` : ""} ·{" "}
+                          {new Date(fork.created_at).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}
+                        </span>
+                      </div>
+                      {status && (
+                        <span
+                          className={`ml-auto rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                            status === "Assigned"
+                              ? "bg-chip-sheet text-chip-sheet-ink"
+                              : "bg-chip-slides text-chip-slides-ink"
+                          }`}
+                        >
+                          {status}
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        )}
 
         {/* Room for a future "How did it go?" notes section. */}
       </main>
