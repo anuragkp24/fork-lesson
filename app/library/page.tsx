@@ -1,26 +1,12 @@
-import Link from "next/link";
 import { AppHeader } from "@/components/app-header";
-import { ForkIcon } from "@/components/fork-icon";
-import { YouTag } from "@/components/you-tag";
-import { FileChip } from "@/components/file-chip";
+import { LIBRARY_LESSON_SELECT, LibraryCard, type LibraryLesson } from "@/components/lesson-card";
+import { topTags } from "@/lib/hub/tags";
 import { initials } from "@/lib/initials";
-import { forkedLabel } from "@/lib/library/forks";
 import { groupByTeacher, teacherOptions } from "@/lib/library/group";
-import { attachmentSummaryParts, matchesQuery } from "@/lib/library/search";
+import { matchesQuery } from "@/lib/library/search";
+import { logQueryError } from "@/lib/supabase/log";
 import { createClient, getUser } from "@/lib/supabase/server";
-import { btnPrimary, card, input } from "@/lib/ui";
-
-type LibraryLesson = {
-  id: string;
-  owner_id: string;
-  title: string;
-  description: string | null;
-  topic_name: string | null;
-  source_updated_at: string | null;
-  teacher: { name: string | null; email: string } | null;
-  course: { name: string; section: string | null } | null;
-  attachments: { kind: string; mime_type: string | null; unsupported_type: string | null }[];
-};
+import { btnPrimary, input } from "@/lib/ui";
 
 export default async function LibraryPage({ searchParams }: { searchParams: Promise<{ q?: string; teacher?: string }> }) {
   const { q = "", teacher = "" } = await searchParams;
@@ -29,25 +15,37 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
   // (plus my own).
   const supabase = await createClient();
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("lessons")
-    .select(
-      "id, owner_id, title, description, topic_name, source_updated_at, teacher:users(name, email), course:courses(name, section), attachments(kind, mime_type, unsupported_type)"
-    )
+    .select(LIBRARY_LESSON_SELECT)
     .eq("kind", "original")
     .eq("hidden", false)
     .order("source_updated_at", { ascending: false, nullsFirst: false })
     .limit(300)
     .returns<LibraryLesson[]>();
 
+  logQueryError("library lessons", error);
   const all = data ?? [];
 
   // "Forked N times" per original lesson. If this lookup fails the cards just
   // show no count.
-  const { data: counts } = await supabase.rpc("lesson_fork_counts", { ids: all.map((l) => l.id) });
+  const { data: counts, error: countsError } = await supabase.rpc("lesson_fork_counts", { ids: all.map((l) => l.id) });
+  logQueryError("library fork counts", countsError);
   const forkCount = new Map<string, number>(
     ((counts ?? []) as { lesson_id: string; forks: number }[]).map((c) => [c.lesson_id, c.forks])
   );
+
+  // "What teachers like" for every card in one call (anonymous counts), and the
+  // lessons I've saved (my own rows only). If either fails the cards just
+  // show no chips or hollow hearts.
+  const [{ data: tagRows, error: tagError }, { data: savedRows, error: savedError }] = await Promise.all([
+    supabase.rpc("lesson_tag_counts", { ids: all.map((l) => l.id) }),
+    supabase.from("saved_lessons").select("lesson_id"),
+  ]);
+  logQueryError("library tag counts", tagError);
+  logQueryError("library saved", savedError);
+  const tagCounts = (tagRows ?? []) as { lesson_id: string; tag: string; n: number }[];
+  const saved = new Set((savedRows ?? []).map((r: { lesson_id: string }) => r.lesson_id));
   const options = teacherOptions(all, user.id);
   const lessons = all.filter(
     (l) =>
@@ -116,42 +114,17 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
               <div key={cls.label} className="flex flex-col gap-3">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-muted">{cls.label}</h3>
                 <ul className="grid gap-4 sm:grid-cols-2">
-                  {cls.lessons.map((lesson) => {
-                    const mine = lesson.owner_id === user.id;
-                    const classLine = lesson.course
-                      ? `${lesson.course.name}${lesson.course.section ? ` · ${lesson.course.section}` : ""}`
-                      : "Class";
-                    return (
-                      <li key={lesson.id}>
-                        <Link
-                          href={`/lesson/${lesson.id}`}
-                          className={`${card} flex h-full flex-col gap-3 p-5 transition-colors hover:border-brand`}
-                        >
-                          <p className="text-xs font-bold uppercase tracking-wider text-brand">{classLine}</p>
-                          <h4 className="text-lg font-bold leading-snug">{lesson.title}</h4>
-                          <p className="flex flex-wrap items-center gap-2 text-sm text-muted">
-                            <span>{lesson.teacher?.name ?? lesson.teacher?.email ?? "A teacher"}</span>
-                            {mine && <YouTag />}
-                            {lesson.topic_name && <span>· {lesson.topic_name}</span>}
-                          </p>
-                          {(lesson.attachments.length > 0 || forkedLabel(forkCount.get(lesson.id) ?? 0)) && (
-                            <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-1">
-                              <div className="flex flex-wrap gap-1.5">
-                                {attachmentSummaryParts(lesson.attachments).map(({ label, count }) => (
-                                  <FileChip key={label} label={label} count={count} />
-                                ))}
-                              </div>
-                              {forkedLabel(forkCount.get(lesson.id) ?? 0) && (
-                                <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand">
-                                  <ForkIcon /> {forkedLabel(forkCount.get(lesson.id) ?? 0)}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </Link>
-                      </li>
-                    );
-                  })}
+                  {cls.lessons.map((lesson) => (
+                    <li key={lesson.id}>
+                      <LibraryCard
+                        lesson={lesson}
+                        mine={lesson.owner_id === user.id}
+                        saved={saved.has(lesson.id)}
+                        forkCount={forkCount.get(lesson.id) ?? 0}
+                        tags={topTags(tagCounts, lesson.id, 2)}
+                      />
+                    </li>
+                  ))}
                 </ul>
               </div>
             ))}

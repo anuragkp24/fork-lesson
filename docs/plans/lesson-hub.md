@@ -2,7 +2,7 @@
 
 Replaces section 8 step 3 ("Teacher versions") of `fork-lineage.md`. Steps 1 and 2 of that plan are built and committed (4d93b5a, 2021d93).
 
-Status: H1 to H3 built (local, not pushed; 0004 and 0005 applied Oct 25). H4 to H6 are plan only.
+Status: H1 to H3 live (bdf129f; 0004 and 0005 applied Oct 25). Next: Cards batch A (H4 + C2 + C3, migration 0006), then batch B (C1, migration 0007), then H5 and H6. H4 to H6 and C1 to C3 are plan only.
 
 **Principle.** Things that happen automatically are private. Things a teacher deliberately writes can be public. No student data, ever.
 
@@ -115,6 +115,8 @@ alter table fork_shoutouts enable row level security;   -- no policies: reads go
 2. Validate tags against the list, trim the note, drop it if empty, cap at 300 characters.
 3. Insert. One shout-out per fork, not editable in this step.
 
+*Changed by C3:* a forker who clicked **Skip** can send thanks later from a **Say thanks** link. Still one per fork, final once sent. The action already allows it; only the UI changes.
+
 **Dialog.** The shout-out comes **after** the draft is created, on the success screen, so it can never block or fail a fork:
 - "Draft created in Band · Section B" (as now), then **Say thanks to Sofia?** (optional)
 - Six tag buttons (toggle, `aria-pressed`): Saved me time · Ready to use · Great materials · Clear instructions · Students will love it · Easy to adapt
@@ -139,7 +141,9 @@ The labels live in `lib/hub/tags.ts` (`SHOUTOUT_TAGS`: key, label), shared by di
 
 ## H4. "What teachers like"
 
-**Migration `0006_tag_counts.sql`.** `lesson_tag_counts(p_lesson uuid)` returns `(tag, n)`: counts across shout-outs on forks whose `lesson_id = p_lesson` (forks of the lesson itself; shout-outs on a version go to that version, H6). Same visibility check as the other functions. No names, no notes, no fork ids.
+Built together with C2 and C3 (Cards, batch A), in one migration.
+
+**Migration `0006_cards.sql`** (see batch A below). `lesson_tag_counts(ids uuid[])` returns `(lesson_id, tag, n)`: counts across shout-outs on forks whose `lesson_id` is one of `ids` (forks of the lesson itself; shout-outs on a version go to that version, H6). It takes an array so the Library gets every card's counts in one call (C3); the lesson page passes `[id]`. Same visibility check as the other functions. No names, no notes, no fork ids.
 
 **App.** A **What teachers like** card under the header: chips like "Saved me time · 2", sorted by count then by the fixed tag order. Hidden when there are none. Shown to everyone, author included.
 
@@ -152,9 +156,187 @@ The labels live in `lib/hub/tags.ts` (`SHOUTOUT_TAGS`: key, label), shared by di
 
 ---
 
+## Cards (C1–C3)
+
+Lesson cards in the Library and My lessons get a picture of the first file, a private heart, and shout-outs. Built in two batches:
+- **Batch A:** H4 + C2 (Save for later) + C3 (shout-outs on cards). One migration, `0006_cards.sql`. Also turns My lessons into cards, so batch B only adds the picture.
+- **Batch B:** C1 (card pictures). Migration `0007_card_thumbnails.sql`. Teacher notes and versions move to 0008 (H5) and 0009 (H6).
+
+Who sees what, adding to the table at the top (H2 rules unchanged):
+
+| What | Who sees it |
+|---|---|
+| Top 1–2 "What teachers like" tags on a Library card | Everyone, anonymous (same data as H4) |
+| "N thank-yous" on a card, and the new-thanks dot | The original author only, in My lessons |
+| "Thanks sent ✓" / "Say thanks" on a fork card | That forker only |
+| Saved lessons (heart) | The saver only. No counts anywhere |
+| Card picture | Anyone who can see the lesson (it is the library copy, already shared with the domain) |
+
+Notes from shout-outs never appear on any card.
+
+Cards decisions (Oct 25, Raj + planner):
+1. **Picture:** the first Drive attachment with a library copy, by position; none → file-type icon.
+2. **My lessons as cards:** yes. One warning line on the card; per-file states stay on the lesson page.
+3. **Fork cards:** show the original's picture.
+4. **Lessons in unshared classes:** no picture (no library copy), icon tile. OK for now.
+5. **Heart on the lesson page:** yes, in the header too. Same button; never on your own lessons or on forks.
+6. **Small numbers:** no minimum. Tag chips show from 1.
+7. **`saved_lessons`:** written with the signed-in client, guarded by row level security.
+
+Cast for both checks: **Sofia** (author of P and R), **Henry** (forked R and sent thanks in the H3 check), **Carlos** (forked R in the H2 check, never thanked), **Samuel** (saver; Westview, Geometry · Section C).
+
+### Batch A: H4, Save for later, shout-outs on cards
+
+**Migration `0006_cards.sql`** (one `begin; … commit;`):
+```sql
+-- H4 + C3: tag counts for many lessons at once (Library cards and the lesson page).
+create function lesson_tag_counts(ids uuid[]) returns table (lesson_id uuid, tag text, n int) …
+  -- counts over fork_shoutouts s join forks f on f.id = s.fork_id
+  -- where f.lesson_id = any(ids), f.removed_at is null, f.status in ('done','partial'),
+  -- plus the same "can the caller see this original" check as lesson_fork_counts. No names, notes or fork ids.
+
+-- C3: the author's private thank-you count, and which ones are new.
+alter table fork_shoutouts add column seen_by_author_at timestamptz;
+drop function lesson_fork_counts(uuid[]);
+create function lesson_fork_counts(ids uuid[])
+  returns table (lesson_id uuid, forks int, versions int, taught int, thanks int, new_thanks int) …
+  -- thanks / new_thanks: shout-outs on forks with f.lesson_id = l.id (new = seen_by_author_at is null).
+  -- Both null unless the caller owns the lesson, like taught.
+
+create function mark_thanks_seen(p_lesson uuid) returns void …
+  -- sets seen_by_author_at = now() on that lesson's unseen shout-outs, only when auth.uid() owns it.
+
+-- C3: which of my forks I've already thanked for. Only the caller's own forks.
+create function my_thanks_sent(fork_ids uuid[]) returns setof uuid …
+  -- select s.fork_id from fork_shoutouts s join forks f on f.id = s.fork_id
+  -- where s.fork_id = any(fork_ids) and f.forker_id = auth.uid()
+
+-- C2: Save for later. Own rows only.
+create table saved_lessons (
+  user_id uuid not null default auth.uid() references users on delete cascade,
+  lesson_id uuid not null references lessons on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, lesson_id)
+);
+alter table saved_lessons enable row level security;
+create policy saved_read on saved_lessons for select to authenticated using (user_id = auth.uid());
+create policy saved_insert on saved_lessons for insert to authenticated with check (
+  user_id = auth.uid()
+  and exists (select 1 from lessons l                       -- lessons policy applies: must be visible
+               where l.id = lesson_id and l.kind = 'original' and l.owner_id <> auth.uid()));
+create policy saved_delete on saved_lessons for delete to authenticated using (user_id = auth.uid());
+grant select, insert, delete on saved_lessons to authenticated;
+```
+All functions `security definer`, `set search_path = public`, execute revoked from `public, anon`, granted to `authenticated`. `fork_shoutouts` keeps no policies. `my_thanks_sent` is a function rather than a read policy so a forker can never see whether the author has opened her thanks.
+
+This is the first table teachers write through their own session instead of the admin client. The server action still does the write; row level security is the guard, and the SQL checks prove it.
+
+**H4 on the lesson page**, as specced above, calling `lesson_tag_counts([id])`.
+
+**Shared card (`components/lesson-card.tsx`).** One card for Library, Saved, and My lessons: class line, title, teacher (+ You), topic, file chips, "Forked N times", and slots for the heart, tags, and badges. The title is the link and stretches over the card; the heart is a separate button on top of it, so the two never nest. Batch B adds the picture slot at the top.
+
+**C2 Save for later.**
+- `components/save-button.tsx` (client): heart outline / filled, `aria-pressed`, label "Save for later" / "Saved". Toggles at once, undoes on error.
+- Server action `setSaved({ lessonId, saved })` in `app/library/actions.ts`: insert or delete with the signed-in client, so row level security decides. Revalidates `/library`, `/lessons` and `/lesson/<id>`.
+- Shown on every Library card, every Saved card, and in the **lesson page header** (next to **Fork to my class**), **not** on your own lessons or on fork cards. A fork never has its own page (it redirects to the original), so the header heart is always for an original.
+- The lesson page reads whether I saved it with one `saved_lessons` select for that lesson id (signed-in client, own rows only), only when I'm not the owner.
+- My lessons gets two tabs: **My lessons** and **Saved** (`/lessons?tab=saved`). Saved lists saved lessons I can still see, newest save first, as Library cards. If a lesson is later hidden or unshared it drops out of the list; it comes back if shared again. Empty state: "Tap the heart on any lesson in the Library to save it here."
+- No counts anywhere, including for the author.
+
+**C3 Shout-outs on cards.**
+- **Library card (everyone):** the top 2 tags as chips, e.g. "Saved me time · 2", from one `lesson_tag_counts(all ids)` call next to the existing `lesson_fork_counts` call. Sorted by count, then the fixed tag order. Nothing when there are none.
+- **Author's card in My lessons:** "3 thank-yous" (hidden at 0) from the new `thanks` column, with a dot and screen-reader text "2 new" when `new_thanks > 0`. Links to the lesson page. When she opens her lesson page, the page calls `mark_thanks_seen` after loading (errors ignored), so the dot clears next time she looks at My lessons.
+- **Forker's fork card in My lessons:** "Thanks sent ✓" when `my_thanks_sent` includes the fork; otherwise a **Say thanks** button, shown only when the original is still visible to me and the fork worked. It opens the same thanks form as the fork dialog, in a small dialog. After Send: "Thanks sent ✓", final.
+- **Lesson page, Your fork row:** the same "Thanks sent ✓" / **Say thanks** (from `shoutout_tags` / `shoutout_note`, already returned to the forker).
+- The H3 thanks form moves out of `fork-dialog.tsx` into `components/thanks-form.tsx`, used by both places. `sendShoutout` is unchanged apart from also revalidating `/lessons`.
+- My lessons fork rows need `fork_id` in the select; forks still link to the original's page, as now.
+
+**My lessons as cards.** Classes and topics stay as headings; lessons become the shared card in a two-column grid. The per-file "In library / Couldn't be shared / Not shared yet" lines move off the card: the card shows one warning line, "1 file couldn't be shared", linking to the lesson page, which already shows each file's state to the author.
+
+**Pure helpers.**
+- `lib/hub/tags.ts`: `sortTagCounts(rows)` and `topTags(rows, lessonId, 2)`.
+- `lib/hub/thanks.ts` (new): `thanksBadge({ thanks, newThanks })` → null at 0 / "1 thank-you" / "3 thank-yous" + `hasNew`; `forkThanksState({ sent, originalVisible, forkOk })` → `"sent" | "can-thank" | null`.
+- `lib/library/tabs.ts` (new): `lessonsTab(param)` → `"mine" | "saved"`; `publishProblemLabel(attachments)`.
+
+**Tests.** `sortTagCounts` (order, ties, unknown tag ignored, empty); `topTags` (top 2, ties broken by tag order, only that lesson's rows); `thanksBadge` (0, 1, many, new and none new); `forkThanksState` (sent, can thank, original hidden, failed fork); `lessonsTab` (missing, unknown, saved); `publishProblemLabel` (none, one, several).
+
+**SQL checks** (each in `begin; set local role authenticated; set local request.jwt.claims = '{"sub":"<id>"}'; … rollback;`):
+- **Samuel:** `insert into saved_lessons (lesson_id) values ('<R>')` works; `select * from saved_lessons` shows 1 row. Inserting with `user_id = '<Henry>'` is refused. Inserting one of his own lessons is refused. Inserting a hidden lesson's id is refused.
+- **Henry:** `select * from saved_lessons` shows none of Samuel's rows. `delete from saved_lessons where user_id = '<Samuel>'` deletes 0 rows.
+- **Henry:** `lesson_tag_counts(array['<R>','<P>'])` returns R's tags only, with no names. `lesson_fork_counts(array['<R>'])`: `thanks` and `new_thanks` are null.
+- **Sofia:** `lesson_fork_counts(array['<R>'])`: `thanks = 1`, `new_thanks = 1` (Henry's). After `select mark_thanks_seen('<R>')`, `new_thanks = 0`.
+- **Henry:** `mark_thanks_seen('<R>')` changes nothing (check as Sofia afterwards).
+- **Carlos:** `my_thanks_sent(array['<Henry's R fork>'])` returns nothing. `select * from fork_shoutouts` returns 0 rows.
+
+**Check (batch A).** Start state: Carlos and Henry have both forked R, only Henry sent thanks ("Saved me time", "Clear instructions", note "Using this Monday"). If Henry's skipped second fork from the H3 check exists, it shows **Say thanks** in step 5.
+1. **Samuel**, Library: R's card shows "Saved me time · 1" and "Clear instructions · 1", no names, no note. P's card has no tags. Every card except his own has a heart.
+2. **Samuel** hearts R and P, opens My lessons → **Saved**: both cards, hearts filled. Reload: still there. Unheart P on the Saved tab: it leaves the list. He opens lesson P: the heart in the header is empty. He hearts it there; back on **Saved**, P is listed again with a filled heart, and P's Library card heart is filled too.
+3. **Henry**, My lessons → **Saved**: empty, with the hint. Nowhere in the app shows how many people saved R.
+4. **Sofia**, Library: her R card shows the same two tags, and no heart on her own cards or in the header of her own lesson R page. My lessons: R's card shows "1 thank-you" with a dot; P's card shows nothing. She opens R and comes back: "1 thank-you", no dot. Lesson R shows **What teachers like** (H4 check).
+5. **Henry**, My lessons: his R fork card shows "Thanks sent ✓" and no Say thanks. No thank-you count on any of his cards.
+6. **Carlos**, My lessons: his R fork card shows **Say thanks**. Lesson R, Your fork row: **Say thanks** too.
+7. **Carlos** clicks **Say thanks**, picks "Ready to use", writes "Thank you!", **Send**: the card reads "Thanks sent ✓", and there is no way to send a second one.
+8. **Sofia**, My lessons: R shows "2 thank-yous" with a dot. Lesson R, Forked by: Carlos now has the chip and the note.
+9. **Henry**, Library: R's card now shows "Saved me time · 1" and "Ready to use · 1" (ties go by tag order, so "Clear instructions" drops off the card); lesson R's **What teachers like** shows all three. "Thank you!" appears on no card, for anyone.
+
+### Batch B: C1 card pictures
+
+**What Google's docs say** (Drive API v3 `files` reference, checked Oct 25):
+- `thumbnailLink` is "a short-lived link", which "typically lasts on the order of hours".
+- It is "only populated when the requesting app can access the file's content". For a file that isn't public, it "must be fetched using a credentialed request", and it is not meant to be used directly in web pages (CORS). So the server fetches it with the teacher's token and keeps its own copy.
+- `hasThumbnail` says whether a picture exists; `thumbnailVersion` changes when the picture does, for cache busting.
+- Scopes: `drive.file` covers files this app created, which every library copy is. So reading a library copy's picture works with `drive.file` alone, and keeps working with the Picker fallback if `drive.readonly` (restricted) is dropped.
+- Not in the docs: the `=s220` size suffix on the link. Changing it to get a larger picture is undocumented; try it, and fall back to the link as given.
+
+**Migration `0007_card_thumbnails.sql`.**
+```sql
+begin;
+alter table attachments
+  add column thumbnail_path text,             -- object in the private "thumbnails" bucket
+  add column thumbnail_version text,          -- Drive thumbnailVersion, for cache busting
+  add column thumbnail_checked_at timestamptz;
+insert into storage.buckets (id, name, public) values ('thumbnails', 'thumbnails', false);
+-- no storage.objects policies: only the server (admin client) reads or writes the bucket
+commit;
+```
+`syncAttachments` updates only the columns it maps, so these survive every sync.
+
+**Fetching (part of Sync and publish, read-only on Google).** After `publishLibrary` copies files, a new `lib/publish/thumbnails.ts` runs with the same teacher's token:
+1. For each shared, not-hidden original of that teacher: pick the card's attachment with `pickThumbnailAttachment` (the first Drive attachment with a library copy, by position). Skip when it already has `thumbnail_path`.
+2. `getThumbnailInfo(library_file_id)` (`fields=hasThumbnail,thumbnailLink,thumbnailVersion`). No link yet (new copies can take a while): set `thumbnail_checked_at` and try again next sync.
+3. `fetchThumbnail(link, token)`: `Authorization: Bearer`, only `https://*.googleusercontent.com` links, image types only, 1 MB cap. Upload to `thumbnails/<owner id>/<attachment id>` with the admin client; save the path and version.
+4. At most 25 pictures per sync so sync stays quick; the rest come next time. Failures never fail the sync and are logged without the link.
+5. Clean-up: remove objects in `<owner id>/` that no attachment row points at any more (lesson deleted, file removed).
+
+Library copies don't change after publish, so one fetch per copy is enough. When a copy is replaced (H6 or a later re-publish), its new id has no picture yet and step 1 fetches again.
+
+**Serving.** `app/api/thumbnail/[lessonId]/route.ts` (GET):
+- Reads the lesson and its picked attachment with the signed-in client, so row level security decides: not visible (hidden, unshared, other domain, signed out) → 404.
+- Downloads the object with the admin client and returns it with `Cache-Control: private, max-age=86400`.
+- Cards use `/api/thumbnail/<lessonId>?v=<thumbnail_version>`, so a new picture shows at once. Same-origin, so Safari's cookie blocking doesn't apply.
+
+**Card.** A 16:9 picture at the top of `lesson-card.tsx` (`object-cover`, `object-top`, `alt=""` since the title says the same), then title, teacher, class, file chips, "Forked N times", as now. No picture → a soft tile with the file-type icon of the first attachment (Doc, Slides, Sheet, PDF, video, link) via `fallbackIcon`. Fork cards in My lessons show the original's picture; if the original is no longer visible, the icon. Lessons in unshared classes have no library copy, so their cards show the icon.
+
+**Pure helpers** in `lib/cards/thumbnail.ts`: `pickThumbnailAttachment(attachments)`, `thumbnailSrc(lessonId, version)`, `fallbackIcon(kind, mimeType)`, `isAllowedThumbnailUrl(url)`, `sizedThumbnailLink(link, px)`.
+
+**Tests.** `pickThumbnailAttachment` (Drive first, link first, Drive without library copy, no attachments, position order); `thumbnailSrc` (with and without version, encoding); `fallbackIcon` (each type, unknown); `isAllowedThumbnailUrl` (googleusercontent ok; http, other hosts, look-alike hosts refused); `sizedThumbnailLink` (replaces `=s220`, leaves other links alone).
+
+**SQL checks.** After Sofia's sync: `select count(*) from attachments a join lessons l on l.id = a.lesson_id where l.owner_id = '<Sofia>' and a.thumbnail_path is not null` equals the number of her shared lessons whose first Drive file is in the library. `select count(*) from storage.objects where bucket_id = 'thumbnails'` matches. As Henry (authenticated role), `select * from storage.objects where bucket_id = 'thumbnails'` returns 0 rows.
+
+**Check (batch B).** Setup, you run: 0007, then **Sofia** clicks **Sync and publish** (reads Drive pictures, writes nothing to Google). I verify by text, counts, and status codes; the pictures themselves you look at.
+1. SQL checks above pass.
+2. **Henry**, Library: R's and P's cards each have a picture; `/api/thumbnail/<R>` returns 200 with an image type. The page makes no requests to googleusercontent.com.
+3. A Sofia lesson whose first attachment is a link (or with no Drive file in the library): icon tile, no broken image.
+4. **Samuel**, Saved tab: the same pictures. **Henry**, My lessons: his R fork card shows R's picture. **Carlos** too.
+5. **Sofia** hides lesson R: **Henry**'s `/api/thumbnail/<R>` returns 404, and R leaves his Library and Samuel's Saved tab. Unhide: back.
+6. Signed out, `/api/thumbnail/<R>` doesn't return the image.
+7. The next day (link long expired), the pictures still load: they come from our copy.
+
+---
+
 ## H5. Teacher notes
 
-**Migration `0007_teacher_notes.sql`.**
+**Migration `0008_teacher_notes.sql`.**
 ```sql
 alter table users add column school text check (char_length(school) between 1 and 80);  -- shown with notes
 
@@ -186,7 +368,7 @@ Three `security definer` functions, each checking `auth.uid()` itself:
 - Server action `setSchool(school)`: trims, 1 to 80 characters, writes only the caller's own row with the admin client (there is no update policy on `users`). Pure `parseSchool` and `schoolOptions(rows)` (dedupe ignoring case and spaces, sort) in `lib/hub/school.ts`.
 - The account menu shows the school with a **Change** link back to `/welcome`.
 
-**Demo SQL** (run once after 0007, in the Supabase SQL editor). Sofia and Samuel's schools come from the slice 1 plan; fill in Carlos's and Henry's:
+**Demo SQL** (run once after 0008, in the Supabase SQL editor). Sofia and Samuel's schools come from the slice 1 plan; fill in Carlos's and Henry's:
 ```sql
 begin;
 update users set school = 'Central Middle' where email = 'sofia.marchetti@gedu.demo.edstitch.com';
@@ -223,7 +405,7 @@ To see the onboarding screen itself, set one teacher's school back to null and s
 
 The old Step 3, adjusted to the principle: sharing is a deliberate act, so a shared version is public; what happens to it afterwards (who forked it, their status) stays private to its author.
 
-**Migration `0008_teacher_versions.sql`.**
+**Migration `0009_teacher_versions.sql`.**
 - `lesson_versions(p_lesson uuid)` returns `(lesson_id, author_name, author_school, change_summary, shared_at, forks)`: shared versions of the original (`forked_from_lesson_id = p_lesson and version_shared`). `forks` is a count only.
 - `lesson_forks` and `lesson_tag_counts` also accept a version id: the version's author gets the author branch for forks of their version (`lesson_id = version id`), with shout-outs; the original author keeps seeing every fork under the root, marked "via Carlos's version".
 - No change to `lessons_read` (0002 already shows `version_shared` rows to the domain).
@@ -262,11 +444,12 @@ The old Step 3, adjusted to the principle: sharing is a deliberate act, so a sha
 | H1 | `components/app-header.tsx`, `components/you-tag.tsx` (new), `lib/library/links.ts`, `app/lesson/[id]/page.tsx`, `app/library/page.tsx` |
 | H2 | `supabase/migrations/0004_hub_visibility.sql`, `lib/library/forks.ts`, `app/lesson/[id]/page.tsx`, `app/library/page.tsx` |
 | H3 | `0005_shoutouts.sql`, `lib/hub/tags.ts` (new), `lib/hub/shoutout.ts` (new), `app/lesson/[id]/actions.ts` (new), `fork-dialog.tsx`, `page.tsx` |
-| H4 | `0006_tag_counts.sql`, `lib/hub/tags.ts`, `page.tsx` |
-| H5 | `0007_teacher_notes.sql`, `lib/hub/notes.ts` (new), `lib/hub/school.ts` (new), `app/welcome/` (new), `app/auth/callback/route.ts`, `proxy.ts`, `components/app-header.tsx`, `app/lesson/[id]/notes.tsx` (new, client), `actions.ts`, `page.tsx` |
-| H6 | `0008_teacher_versions.sql`, `lib/fork/run.ts`, `lib/fork/diff.ts` (new), `lib/sync/fork-sync.ts`, `lib/publish/run.ts`, `lib/publish/share-version.ts` (new), `app/lessons/page.tsx`, `app/lessons/actions.ts`, `page.tsx` |
+| H4 + C2 + C3 (batch A) | `0006_cards.sql`, `lib/hub/tags.ts`, `lib/hub/thanks.ts` (new), `lib/library/tabs.ts` (new), `components/lesson-card.tsx` (new), `components/save-button.tsx` (new), `components/thanks-form.tsx` (new, from `fork-dialog.tsx`), `app/library/actions.ts` (new), `app/library/page.tsx`, `app/lessons/page.tsx`, `app/lesson/[id]/actions.ts`, `fork-dialog.tsx`, `app/lesson/[id]/page.tsx` (H4 card, header heart, Say thanks, `mark_thanks_seen`) |
+| C1 (batch B) | `0007_card_thumbnails.sql`, `lib/google/drive.ts`, `lib/publish/thumbnails.ts` (new), `lib/sync/run.ts` or `app/lessons/actions.ts` (call it after publish), `lib/cards/thumbnail.ts` (new), `app/api/thumbnail/[lessonId]/route.ts` (new), `components/lesson-card.tsx` |
+| H5 | `0008_teacher_notes.sql`, `lib/hub/notes.ts` (new), `lib/hub/school.ts` (new), `app/welcome/` (new), `app/auth/callback/route.ts`, `proxy.ts`, `components/app-header.tsx`, `app/lesson/[id]/notes.tsx` (new, client), `actions.ts`, `page.tsx` |
+| H6 | `0009_teacher_versions.sql`, `lib/fork/run.ts`, `lib/fork/diff.ts` (new), `lib/sync/fork-sync.ts`, `lib/publish/run.ts`, `lib/publish/share-version.ts` (new), `app/lessons/page.tsx`, `app/lessons/actions.ts`, `page.tsx` |
 
-Each migration is run once by you in the Supabase SQL editor, wrapped in `begin; … commit;` like 0002 and 0003. None of H1 to H5 changes Google data. H6 copies files into the forker's library folder on Share and trashes them on Stop sharing, only when the forker clicks.
+Each migration is run once by you in the Supabase SQL editor, wrapped in `begin; … commit;` like 0002 and 0003. None of H1 to H5 or C1 to C3 changes Google data (C1 only reads Drive pictures during Sync and publish). H6 copies files into the forker's library folder on Share and trashes them on Stop sharing, only when the forker clicks.
 
 ## Out of scope
 Author email notifications, the "How did it go?" nudge, anything based on returned or submitted student work, editing a shout-out after sending, reporting or moderating notes beyond delete.
@@ -277,6 +460,9 @@ Author email notifications, the "How did it go?" nudge, anything based on return
 3. **School is new data**, self-reported at onboarding. A typo creates a second school in the list; fix it by SQL for now.
 4. **"Taught in N classes" is only as fresh as each forker's last sync**, like Draft / Assigned today.
 5. **Functions are the security boundary.** The SQL checks after each migration are the proof; don't demo a step before its checks pass.
+6. **Cards make small numbers more visible.** Tag chips now sit on every Library card, so risk 1 applies to the whole Library, not just the lesson page. Decided Oct 25: no minimum, chips show from 1.
+7. **A card picture shows the first page to everyone who can see the lesson.** It is the same file already shared with the domain, so nothing new is exposed, but a first page that names students is now easier to notice. Teachers' own materials only; no student data is read.
+8. **Card pictures depend on Drive making one.** New copies can take a while, and some types never get one; those cards show the icon until a later sync.
 
 ## Open questions
-None. See Decisions at the top.
+None. See Decisions at the top (H1 to H6) and Cards decisions (C1 to C3).

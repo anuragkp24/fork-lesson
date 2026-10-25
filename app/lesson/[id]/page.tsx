@@ -3,11 +3,15 @@ import { notFound, redirect } from "next/navigation";
 import { AppHeader } from "@/components/app-header";
 import { FileChip } from "@/components/file-chip";
 import { ForkIcon } from "@/components/fork-icon";
+import { SaveButton } from "@/components/save-button";
+import { SayThanks, ThanksSent } from "@/components/say-thanks";
 import { YouTag } from "@/components/you-tag";
 import { forkStatusLabel, forkedLabel, hubSection, hubTarget, taughtLabel } from "@/lib/library/forks";
-import { tagLabel } from "@/lib/hub/tags";
+import { sortTagCounts, tagLabel } from "@/lib/hub/tags";
+import { forkThanksState } from "@/lib/hub/thanks";
 import { firstName, initials } from "@/lib/initials";
 import { drivePreviewUrl } from "@/lib/library/links";
+import { logQueryError } from "@/lib/supabase/log";
 import { createClient, getUser } from "@/lib/supabase/server";
 import { attachmentLabel } from "@/lib/sync/map";
 import { card } from "@/lib/ui";
@@ -42,13 +46,15 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
   const supabase = await createClient();
 
   // Row level security hides lessons I'm not allowed to see, so they 404.
-  const { data: lesson } = await supabase
+  const { data: lesson, error: lessonError } = await supabase
     .from("lessons")
     .select(
-      "id, owner_id, kind, forked_from_lesson_id, title, description, topic_name, teacher:users(name, email), course:courses(name, section), attachments(id, position, kind, title, url, mime_type, unsupported_type, library_file_id, publish_error)"
+      "id, owner_id, kind, forked_from_lesson_id, title, description, topic_name, teacher:users!lessons_owner_id_fkey(name, email), course:courses(name, section), attachments(id, position, kind, title, url, mime_type, unsupported_type, library_file_id, publish_error)"
     )
     .eq("id", id)
     .maybeSingle<LessonDetail>();
+  // A real failure is logged; a lesson hidden by row level security is just a 404.
+  logQueryError("lesson page", lessonError);
   if (!lesson) notFound();
 
   // A fork has no page of its own: the original lesson is the hub.
@@ -58,10 +64,24 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
   // The database decides what each viewer may see: the author gets every fork
   // (no status) and "taught", a forker only their own forks with status,
   // anyone else only the count.
-  const [{ data: forkRows }, { data: countRows }] = await Promise.all([
+  const isOwner = lesson.owner_id === user.id;
+  const [forksResult, countsResult, tagsResult, savedResult] = await Promise.all([
     supabase.rpc("lesson_forks", { p_lesson: lesson.id }),
     supabase.rpc("lesson_fork_counts", { ids: [lesson.id] }),
+    supabase.rpc("lesson_tag_counts", { ids: [lesson.id] }),
+    // Whether I saved it: my own rows only, and never for my own lesson.
+    isOwner
+      ? { data: null, error: null }
+      : supabase.from("saved_lessons").select("lesson_id").eq("lesson_id", lesson.id).maybeSingle(),
   ]);
+  logQueryError("lesson forks", forksResult.error);
+  logQueryError("lesson fork counts", countsResult.error);
+  logQueryError("lesson tag counts", tagsResult.error);
+  logQueryError("lesson saved", savedResult.error);
+  const forkRows = forksResult.data;
+  const countRows = countsResult.data;
+  const tagRows = tagsResult.data;
+  const savedRow = savedResult.data;
   const counts = ((countRows ?? []) as { forks: number; taught: number | null }[])[0];
   const forks = (forkRows ?? []) as {
     fork_id: string;
@@ -75,7 +95,7 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
     shoutout_note: string | null;
   }[];
 
-  const isOwner = lesson.owner_id === user.id;
+  const likes = sortTagCounts((tagRows ?? []) as { tag: string; n: number }[]);
   const section = hubSection({ isOwner, forkCount: forks.length });
   const forked = forkedLabel(counts?.forks ?? 0);
   const taught = isOwner ? taughtLabel(counts?.taught) : null;
@@ -134,7 +154,7 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
             {taught && <span>· {taught}</span>}
           </p>
           {!isOwner && (
-            <div>
+            <div className="flex flex-wrap items-center gap-3">
               <ForkDialog
                 lessonId={lesson.id}
                 lessonTitle={lesson.title}
@@ -143,9 +163,26 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
                 classes={classes}
                 items={forkItems}
               />
+              <SaveButton lessonId={lesson.id} initialSaved={!!savedRow} variant="header" />
             </div>
           )}
         </header>
+
+        {likes.length > 0 && (
+          <section className={`${card} flex flex-col gap-3 p-6`}>
+            <h2 className="text-lg font-bold">What teachers like</h2>
+            <ul className="flex flex-wrap gap-2">
+              {likes.map((t) => (
+                <li
+                  key={t.tag}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-brand-light px-3 py-1 text-sm font-semibold text-brand"
+                >
+                  {t.label} <span className="font-bold">{t.n}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <section className={`${card} flex flex-col gap-3 p-6`}>
           <h2 className="text-lg font-bold">Instructions</h2>
@@ -205,6 +242,15 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
                   // The author never sees a forker's Draft / Assigned.
                   const status = section === "your-fork" ? forkStatusLabel(fork.state) : null;
                   const tagLabels = (fork.shoutout_tags ?? []).flatMap((key) => tagLabel(key) ?? []);
+                  // Only a forker's own row: the thank-you they sent, or a way to send one.
+                  const thanks =
+                    section === "your-fork"
+                      ? forkThanksState({
+                          sent: fork.shoutout_tags !== null,
+                          originalVisible: true,
+                          forkOk: true,
+                        })
+                      : null;
                   return (
                     <li key={fork.fork_id} className="flex flex-wrap items-start gap-3">
                       <span
@@ -245,9 +291,18 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
                           </blockquote>
                         )}
                       </div>
+                      {thanks && (
+                        <span className="ml-auto">
+                          {thanks === "sent" ? (
+                            <ThanksSent />
+                          ) : (
+                            <SayThanks forkId={fork.fork_id} authorName={firstName(lesson.teacher?.name) ?? "the author"} />
+                          )}
+                        </span>
+                      )}
                       {status && (
                         <span
-                          className={`ml-auto rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                          className={`${thanks ? "" : "ml-auto"} rounded-full px-2.5 py-0.5 text-xs font-semibold ${
                             status === "Assigned"
                               ? "bg-chip-sheet text-chip-sheet-ink"
                               : "bg-chip-slides text-chip-slides-ink"
@@ -265,7 +320,18 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
         )}
 
         {/* Room for a future "How did it go?" notes section. */}
+        <MarkThanksSeen lessonId={isOwner ? lesson.id : null} />
       </main>
     </>
   );
+}
+
+// The author opened her lesson, so its thank-yous are no longer new. Runs
+// after the page has read its counts; a failure just leaves the dot on.
+async function MarkThanksSeen({ lessonId }: { lessonId: string | null }) {
+  if (lessonId) {
+    const supabase = await createClient();
+    await supabase.rpc("mark_thanks_seen", { p_lesson: lessonId });
+  }
+  return null;
 }

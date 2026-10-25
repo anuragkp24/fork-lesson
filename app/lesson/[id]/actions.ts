@@ -36,5 +36,6 @@ export async function sendShoutout(input: { forkId: unknown; tags: unknown; note
   }
 
   if (fork.root_lesson_id) revalidatePath(`/lesson/${fork.root_lesson_id}`);
+  revalidatePath("/lessons");
   return { ok: true };
 }

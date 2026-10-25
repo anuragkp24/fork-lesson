@@ -1,13 +1,17 @@
 import Link from "next/link";
 import { AppHeader } from "@/components/app-header";
 import { ForkBadge } from "@/components/fork-badge";
-import { FileChip } from "@/components/file-chip";
+import { LIBRARY_LESSON_SELECT, LessonCard, LibraryCard, type LibraryLesson } from "@/components/lesson-card";
+import { SayThanks, ThanksSent } from "@/components/say-thanks";
 import { getAccessToken } from "@/lib/google/access-token";
+import { topTags } from "@/lib/hub/tags";
+import { forkThanksState, thanksBadge } from "@/lib/hub/thanks";
+import { firstName } from "@/lib/initials";
 import { myForkStatus } from "@/lib/library/forks";
-import { driveOpenUrl } from "@/lib/library/links";
+import { lessonsTab, publishProblemLabel } from "@/lib/library/tabs";
+import { logQueryError } from "@/lib/supabase/log";
 import { createClient, getUser } from "@/lib/supabase/server";
-import { attachmentLabel } from "@/lib/sync/map";
-import { alertError, card } from "@/lib/ui";
+import { alertError } from "@/lib/ui";
 import { syncAction } from "./actions";
 import { SyncButton } from "./sync-button";
 
@@ -31,6 +35,7 @@ type Lesson = {
   source_updated_at: string | null;
   kind: string;
   classroom_state: string | null;
+  fork_id: string | null;
   forked_from_lesson_id: string | null;
   attachments: Attachment[];
 };
@@ -55,41 +60,18 @@ function newestFirst(a: Lesson, b: Lesson) {
   return (b.source_updated_at ?? "").localeCompare(a.source_updated_at ?? "");
 }
 
-export default async function LessonsPage() {
+const TAB = "inline-flex min-h-11 items-center border-b-2 px-4 text-[15px] font-semibold";
+
+export default async function LessonsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+  const tab = lessonsTab((await searchParams).tab);
   const user = (await getUser())!;
   // The signed-in client, so row level security decides what comes back.
   const supabase = await createClient();
 
-  const [{ data: courses }, { data: sync }, google] = await Promise.all([
-    supabase
-      .from("courses")
-      .select(
-        "id, name, section, lessons(id, title, description, topic_name, source_updated_at, kind, classroom_state, forked_from_lesson_id, attachments(id, position, kind, title, url, mime_type, unsupported_type, library_file_id, publish_error))"
-      )
-      .eq("owner_id", user.id)
-      .order("name")
-      .returns<Course[]>(),
+  const [{ data: sync }, google] = await Promise.all([
     supabase.from("sync_state").select("*").eq("user_id", user.id).maybeSingle(),
     getAccessToken(user.id),
   ]);
-
-  // Who made the original of each fork, for the "Forked from" badge. Anything
-  // that isn't visible to me (deleted, unshared) simply has no entry.
-  const originalIds = [
-    ...new Set(
-      (courses ?? []).flatMap((c) => c.lessons.map((l) => l.forked_from_lesson_id).filter((id): id is string => !!id))
-    ),
-  ];
-  const { data: originals } = originalIds.length
-    ? await supabase
-        .from("lessons")
-        .select("id, teacher:users(name, email)")
-        .in("id", originalIds)
-        .returns<{ id: string; teacher: { name: string | null; email: string } | null }[]>()
-    : { data: [] };
-  const originalTeacher = new Map(
-    (originals ?? []).map((o) => [o.id, o.teacher?.name ?? o.teacher?.email ?? null])
-  );
 
   return (
     <>
@@ -120,102 +102,237 @@ export default async function LessonsPage() {
           </p>
         )}
 
-        {(courses ?? []).map((course) => (
-          <section key={course.id} className="flex flex-col gap-4">
-            <h2 className="flex flex-wrap items-baseline gap-2 text-xl font-bold">
-              {course.name}
-              {course.section && <span className="text-base font-medium text-muted">{course.section}</span>}
-            </h2>
-            {course.lessons.length === 0 && <p className="text-sm text-muted">No lessons in this class.</p>}
-            {groupByTopic([...course.lessons].sort(newestFirst)).map(([topic, lessons]) => (
-              <div key={topic ?? "(none)"} className="flex flex-col gap-3">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-muted">{topic ?? "No topic"}</h3>
-                {lessons.map((lesson) => (
-                  <article key={lesson.id} className={`${card} p-5`}>
-                    <h4 className="text-lg font-bold">
-                      {/* A fork has no page of its own: the original lesson is the hub. */}
-                      {lesson.kind === "fork" && !originalTeacher.has(lesson.forked_from_lesson_id ?? "") ? (
-                        lesson.title
-                      ) : (
-                        <Link
-                          href={`/lesson/${lesson.kind === "fork" ? lesson.forked_from_lesson_id : lesson.id}`}
-                          className="hover:text-brand hover:underline"
-                        >
-                          {lesson.title}
-                        </Link>
-                      )}
-                    </h4>
-                    {lesson.kind === "fork" && (
-                      <p className="mt-2 flex flex-wrap items-center gap-2">
-                        <ForkBadge
-                          originalId={lesson.forked_from_lesson_id}
-                          teacher={originalTeacher.get(lesson.forked_from_lesson_id ?? "") ?? null}
-                        />
-                        {myForkStatus(lesson.classroom_state) && (
-                          <span
-                            className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                              lesson.classroom_state === "PUBLISHED"
-                                ? "bg-chip-sheet text-chip-sheet-ink"
-                                : "bg-chip-slides text-chip-slides-ink"
-                            }`}
-                          >
-                            {myForkStatus(lesson.classroom_state)}
-                          </span>
-                        )}
-                      </p>
-                    )}
-                    {lesson.description && (
-                      <p className="mt-1 text-sm text-muted">
-                        {lesson.description.length > 160 ? `${lesson.description.slice(0, 160)}…` : lesson.description}
-                      </p>
-                    )}
-                    <ul className="mt-4 flex flex-col gap-2 text-sm">
-                      {[...lesson.attachments]
-                        .sort((a, b) => a.position - b.position)
-                        .map((att) => (
-                          <li key={att.id} className="flex flex-wrap items-center gap-2">
-                            <FileChip label={attachmentLabel(att)} />
-                            {att.url ? (
-                              <a href={att.url} target="_blank" rel="noopener noreferrer" className="underline">
-                                {att.title ?? att.url}
-                              </a>
-                            ) : (
-                              <span>{att.title ?? "(untitled)"}</span>
-                            )}
-                            {att.kind === "drive" && lesson.kind === "original" &&
-                              (att.library_file_id ? (
-                                <a
-                                  href={driveOpenUrl(att.library_file_id)}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="rounded-full bg-brand-light px-2.5 py-0.5 text-xs font-semibold text-brand"
-                                >
-                                  In library
-                                </a>
-                              ) : att.publish_error ? (
-                                <span className="rounded-full bg-danger-light px-2.5 py-0.5 text-xs font-semibold text-danger">
-                                  Couldn&apos;t be shared ({att.publish_error})
-                                </span>
-                              ) : (
-                                <span className="text-xs text-muted">Not shared yet</span>
-                              ))}
-                            {att.kind === "unsupported" && (
-                              <span className="text-xs text-chip-slides-ink">Not copied. Re-add it after forking.</span>
-                            )}
-                          </li>
-                        ))}
-                    </ul>
-                  </article>
-                ))}
-              </div>
-            ))}
-          </section>
-        ))}
+        <nav aria-label="My lessons" className="-mb-2 flex gap-1 border-b border-line">
+          <Link
+            href="/lessons"
+            aria-current={tab === "mine" ? "page" : undefined}
+            className={`${TAB} ${tab === "mine" ? "border-brand text-brand" : "border-transparent text-muted hover:text-ink"}`}
+          >
+            My lessons
+          </Link>
+          <Link
+            href="/lessons?tab=saved"
+            aria-current={tab === "saved" ? "page" : undefined}
+            className={`${TAB} ${tab === "saved" ? "border-brand text-brand" : "border-transparent text-muted hover:text-ink"}`}
+          >
+            Saved
+          </Link>
+        </nav>
 
-        {courses?.length === 0 && sync?.last_finished_at && !sync.last_error && (
-          <p className="text-sm text-muted">No active classes found where you are a teacher.</p>
+        {tab === "saved" ? (
+          <SavedLessons userId={user.id} />
+        ) : (
+          <MyLessons userId={user.id} showEmptyNote={!!sync?.last_finished_at && !sync.last_error} />
         )}
       </main>
+    </>
+  );
+}
+
+// Saved lessons I can still see, newest save first. One that is later hidden
+// or unshared drops out of the list, and comes back if it is shared again.
+async function SavedLessons({ userId }: { userId: string }) {
+  const supabase = await createClient();
+  const { data: savedRows, error: savedError } = await supabase
+    .from("saved_lessons")
+    .select("lesson_id, created_at")
+    .order("created_at", { ascending: false });
+  logQueryError("saved lessons", savedError);
+  const savedIds = (savedRows ?? []).map((r: { lesson_id: string }) => r.lesson_id);
+
+  const { data, error: lessonsError } = savedIds.length
+    ? await supabase
+        .from("lessons")
+        .select(LIBRARY_LESSON_SELECT)
+        .in("id", savedIds)
+        .eq("kind", "original")
+        .eq("hidden", false)
+        .returns<LibraryLesson[]>()
+    : { data: [] as LibraryLesson[], error: null };
+  logQueryError("saved lessons detail", lessonsError);
+  const byId = new Map((data ?? []).map((l) => [l.id, l]));
+  const lessons = savedIds.flatMap((id) => byId.get(id) ?? []).filter((l) => l.owner_id !== userId);
+
+  const ids = lessons.map((l) => l.id);
+  const [{ data: counts, error: countsError }, { data: tagRows, error: tagError }] = ids.length
+    ? await Promise.all([
+        supabase.rpc("lesson_fork_counts", { ids }),
+        supabase.rpc("lesson_tag_counts", { ids }),
+      ])
+    : [{ data: [], error: null }, { data: [], error: null }];
+  logQueryError("saved fork counts", countsError);
+  logQueryError("saved tag counts", tagError);
+  const forkCount = new Map<string, number>(
+    ((counts ?? []) as { lesson_id: string; forks: number }[]).map((c) => [c.lesson_id, c.forks])
+  );
+  const tagCounts = (tagRows ?? []) as { lesson_id: string; tag: string; n: number }[];
+
+  if (lessons.length === 0) {
+    return <p className="text-sm text-muted">Tap the heart on any lesson in the Library to save it here.</p>;
+  }
+  return (
+    <ul className="grid gap-4 sm:grid-cols-2">
+      {lessons.map((lesson) => (
+        <li key={lesson.id}>
+          <LibraryCard
+            lesson={lesson}
+            mine={false}
+            saved
+            forkCount={forkCount.get(lesson.id) ?? 0}
+            tags={topTags(tagCounts, lesson.id, 2)}
+          />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+async function MyLessons({ userId, showEmptyNote }: { userId: string; showEmptyNote: boolean }) {
+  const supabase = await createClient();
+
+  const { data: courses, error: coursesError } = await supabase
+    .from("courses")
+    .select(
+      "id, name, section, lessons(id, title, description, topic_name, source_updated_at, kind, classroom_state, fork_id, forked_from_lesson_id, attachments(id, position, kind, title, url, mime_type, unsupported_type, library_file_id, publish_error))"
+    )
+    .eq("owner_id", userId)
+    .order("name")
+    .returns<Course[]>();
+
+  logQueryError("my lessons", coursesError);
+  const allLessons = (courses ?? []).flatMap((c) => c.lessons);
+
+  // Who made the original of each fork, for the "Forked from" badge. Anything
+  // that isn't visible to me (deleted, unshared) simply has no entry.
+  const originalIds = [
+    ...new Set(allLessons.map((l) => l.forked_from_lesson_id).filter((id): id is string => !!id)),
+  ];
+  const { data: originals, error: originalsError } = originalIds.length
+    ? await supabase
+        .from("lessons")
+        .select("id, teacher:users!lessons_owner_id_fkey(name, email)")
+        .in("id", originalIds)
+        .returns<{ id: string; teacher: { name: string | null; email: string } | null }[]>()
+    : { data: [], error: null };
+  logQueryError("my lessons originals", originalsError);
+  const originalTeacher = new Map(
+    (originals ?? []).map((o) => [o.id, o.teacher?.name ?? o.teacher?.email ?? null])
+  );
+
+  // Fork counts and the private thank-you counts (author only) for my originals.
+  const ownIds = allLessons.filter((l) => l.kind === "original").map((l) => l.id);
+  const forkIds = allLessons.flatMap((l) => (l.kind === "fork" && l.fork_id ? [l.fork_id] : []));
+  const none = { data: [], error: null };
+  const [counts, sent, forks] = await Promise.all([
+    ownIds.length ? supabase.rpc("lesson_fork_counts", { ids: ownIds }) : none,
+    forkIds.length ? supabase.rpc("my_thanks_sent", { fork_ids: forkIds }) : none,
+    forkIds.length ? supabase.from("forks").select("id, status, removed_at").in("id", forkIds) : none,
+  ]);
+  logQueryError("my lessons fork counts", counts.error);
+  logQueryError("my lessons thanks sent", sent.error);
+  logQueryError("my lessons forks", forks.error);
+  const countsById = new Map(
+    ((counts.data ?? []) as { lesson_id: string; forks: number; thanks: number | null; new_thanks: number | null }[]).map(
+      (c) => [c.lesson_id, c]
+    )
+  );
+  const thanked = new Set<string>((sent.data ?? []) as string[]);
+  const forkWorked = new Map(
+    ((forks.data ?? []) as { id: string; status: string; removed_at: string | null }[]).map((f) => [
+      f.id,
+      !f.removed_at && (f.status === "done" || f.status === "partial"),
+    ])
+  );
+
+  return (
+    <>
+      {(courses ?? []).map((course) => (
+        <section key={course.id} className="flex flex-col gap-4">
+          <h2 className="flex flex-wrap items-baseline gap-2 text-xl font-bold">
+            {course.name}
+            {course.section && <span className="text-base font-medium text-muted">{course.section}</span>}
+          </h2>
+          {course.lessons.length === 0 && <p className="text-sm text-muted">No lessons in this class.</p>}
+          {groupByTopic([...course.lessons].sort(newestFirst)).map(([topic, lessons]) => (
+            <div key={topic ?? "(none)"} className="flex flex-col gap-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-muted">{topic ?? "No topic"}</h3>
+              <ul className="grid gap-4 sm:grid-cols-2">
+                {lessons.map((lesson) => {
+                  const isFork = lesson.kind === "fork";
+                  const originalId = lesson.forked_from_lesson_id;
+                  const originalVisible = originalTeacher.has(originalId ?? "");
+                  // A fork has no page of its own: the original lesson is the hub.
+                  const href = isFork ? (originalVisible ? `/lesson/${originalId}` : null) : `/lesson/${lesson.id}`;
+                  const status = isFork ? myForkStatus(lesson.classroom_state) : null;
+                  const own = countsById.get(lesson.id);
+                  const badge = isFork ? null : thanksBadge({ thanks: own?.thanks, newThanks: own?.new_thanks });
+                  const problem = isFork ? null : publishProblemLabel(lesson.attachments);
+                  const thanks = isFork
+                    ? forkThanksState({
+                        sent: !!lesson.fork_id && thanked.has(lesson.fork_id),
+                        originalVisible,
+                        forkOk: !!lesson.fork_id && (forkWorked.get(lesson.fork_id) ?? false),
+                      })
+                    : null;
+                  const authorName = firstName(originalTeacher.get(originalId ?? "")) ?? "the author";
+
+                  return (
+                    <li key={lesson.id}>
+                      <LessonCard
+                        href={href}
+                        title={lesson.title}
+                        description={lesson.description}
+                        attachments={lesson.attachments}
+                        forkCount={isFork ? 0 : (own?.forks ?? 0)}
+                        badges={
+                          <>
+                            {isFork && <ForkBadge originalId={originalId} teacher={originalTeacher.get(originalId ?? "") ?? null} />}
+                            {status && (
+                              <span
+                                className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                                  lesson.classroom_state === "PUBLISHED"
+                                    ? "bg-chip-sheet text-chip-sheet-ink"
+                                    : "bg-chip-slides text-chip-slides-ink"
+                                }`}
+                              >
+                                {status}
+                              </span>
+                            )}
+                            {badge && (
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-light px-2.5 py-0.5 text-xs font-semibold text-brand">
+                                {badge.label}
+                                {badge.hasNew && (
+                                  <>
+                                    <span aria-hidden="true" className="size-2 rounded-full bg-danger" />
+                                    <span className="sr-only">{badge.newCount} new</span>
+                                  </>
+                                )}
+                              </span>
+                            )}
+                            {problem && (
+                              <Link href={`/lesson/${lesson.id}`} className="text-xs font-semibold text-danger underline">
+                                {problem}
+                              </Link>
+                            )}
+                            {thanks === "sent" && <ThanksSent />}
+                            {thanks === "can-thank" && lesson.fork_id && (
+                              <SayThanks forkId={lesson.fork_id} authorName={authorName} />
+                            )}
+                          </>
+                        }
+                      />
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </section>
+      ))}
+
+      {courses?.length === 0 && showEmptyNote && (
+        <p className="text-sm text-muted">No active classes found where you are a teacher.</p>
+      )}
     </>
   );
 }

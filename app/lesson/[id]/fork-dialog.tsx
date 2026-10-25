@@ -2,11 +2,9 @@
 
 import { useRef, useState } from "react";
 import { FileChip } from "@/components/file-chip";
+import { ThanksForm } from "@/components/thanks-form";
 import { topicMatch, type TopicChoice } from "@/lib/fork/plan";
-import { SHOUTOUT_NOTE_MAX } from "@/lib/hub/shoutout";
-import { SHOUTOUT_TAGS, type ShoutoutTag } from "@/lib/hub/tags";
 import { alertError, btnPrimary, btnSecondary, input } from "@/lib/ui";
-import { sendShoutout } from "./actions";
 
 export type ForkClass = { id: string; name: string; section: string | null; topics: string[] };
 export type ForkItem = {
@@ -229,29 +227,7 @@ function Shoutout({
   alternateLink: string;
   onClose: () => void;
 }) {
-  const [tags, setTags] = useState<ShoutoutTag[]>([]);
-  const [note, setNote] = useState("");
   const [stage, setStage] = useState<"ask" | "sent" | "skipped">("ask");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const toggle = (key: ShoutoutTag) =>
-    setTags((current) => (current.includes(key) ? current.filter((k) => k !== key) : [...current, key]));
-  const canSend = (tags.length > 0 || note.trim() !== "") && note.trim().length <= SHOUTOUT_NOTE_MAX;
-
-  async function send() {
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await sendShoutout({ forkId, tags, note });
-      if (result.ok) setStage("sent");
-      else setError(result.error);
-    } catch {
-      setError("Couldn't reach Fork Lesson. Check your connection and try again.");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   if (stage !== "ask") {
     return (
@@ -278,57 +254,12 @@ function Shoutout({
       <h3 className="text-lg font-bold">
         Say thanks to {authorName}? <span className="text-sm font-normal text-muted">(optional)</span>
       </h3>
-      <div className="flex flex-wrap gap-2" role="group" aria-label="What you liked">
-        {SHOUTOUT_TAGS.map((tag) => {
-          const on = tags.includes(tag.key);
-          return (
-            <button
-              key={tag.key}
-              type="button"
-              aria-pressed={on}
-              disabled={busy}
-              onClick={() => toggle(tag.key)}
-              className={`min-h-11 rounded-full border px-3.5 text-sm font-semibold ${
-                on ? "border-brand bg-brand text-white" : "border-line bg-white text-ink hover:bg-brand-light"
-              }`}
-            >
-              {tag.label}
-            </button>
-          );
-        })}
-      </div>
-      <label className="flex flex-col gap-1.5 text-sm">
-        <span className="font-semibold">
-          Add a note to {authorName} (only {authorName} sees it)
-        </span>
-        <textarea
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          maxLength={SHOUTOUT_NOTE_MAX}
-          rows={3}
-          disabled={busy}
-          className={`${input} py-2.5`}
-        />
-        <span className="flex justify-between text-muted">
-          <span>Don&apos;t include student names.</span>
-          <span>
-            {note.length}/{SHOUTOUT_NOTE_MAX}
-          </span>
-        </span>
-      </label>
-      {error && (
-        <p role="alert" className={alertError}>
-          {error}
-        </p>
-      )}
-      <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={send} disabled={busy || !canSend} className={btnPrimary}>
-          {busy ? "Sending…" : "Send"}
-        </button>
-        <button type="button" onClick={() => setStage("skipped")} disabled={busy} className={btnSecondary}>
-          Skip
-        </button>
-      </div>
+      <ThanksForm
+        forkId={forkId}
+        authorName={authorName}
+        onSent={() => setStage("sent")}
+        onSkip={() => setStage("skipped")}
+      />
     </div>
   );
 }

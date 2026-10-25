@@ -19,3 +19,23 @@ export function isShoutoutTag(value: unknown): value is ShoutoutTag {
 export function tagLabel(key: string): string | null {
   return SHOUTOUT_TAGS.find((t) => t.key === key)?.label ?? null;
 }
+
+export type TagCount = { tag: ShoutoutTag; label: string; n: number };
+
+// Counts for one lesson, biggest first, ties in the fixed tag order. Tags we
+// don't know are dropped, and so are zero counts.
+export function sortTagCounts(rows: { tag: string; n: number }[]): TagCount[] {
+  return SHOUTOUT_TAGS.flatMap((t) => {
+    const n = rows.filter((r) => r.tag === t.key).reduce((sum, r) => sum + r.n, 0);
+    return n > 0 ? [{ tag: t.key, label: t.label, n }] : [];
+  }).sort((a, b) => b.n - a.n); // stable: equal counts keep the fixed tag order
+}
+
+// The few tags a Library card shows, from the rows of many lessons.
+export function topTags(
+  rows: { lesson_id: string; tag: string; n: number }[],
+  lessonId: string,
+  limit: number
+): TagCount[] {
+  return sortTagCounts(rows.filter((r) => r.lesson_id === lessonId)).slice(0, limit);
+}
