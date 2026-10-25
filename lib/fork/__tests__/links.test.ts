@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { draftLink } from "../links";
+import { classworkLink } from "../links";
 
-describe("draftLink", () => {
-  it("encodes both ids as unpadded base64", () => {
-    expect(draftLink("123456789", "98765")).toBe(
-      "https://classroom.google.com/c/MTIzNDU2Nzg5/a/OTg3NjU/details"
-    );
+describe("classworkLink", () => {
+  it("links to the class's Classwork tab", () => {
+    // Henry's Science · Section D
+    expect(classworkLink("893715239615")).toBe("https://classroom.google.com/w/ODkzNzE1MjM5NjE1/t/all");
+  });
+
+  it("drops base64 padding", () => {
+    expect(classworkLink("1234")).toBe("https://classroom.google.com/w/MTIzNA/t/all");
   });
 });

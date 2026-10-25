@@ -85,3 +85,21 @@ export async function getDriveMimeType(fileId: string, token: string): Promise<s
     return null;
   }
 }
+
+// One courseWork by id, in any state (drafts included). Null when it no
+// longer exists.
+export async function getCourseWork(
+  courseId: string,
+  courseWorkId: string,
+  token: string
+): Promise<ClassroomCourseWork | null> {
+  try {
+    return await getJson<ClassroomCourseWork>(
+      new URL(`${CLASSROOM}/courses/${courseId}/courseWork/${courseWorkId}`),
+      token
+    );
+  } catch (err) {
+    if (err instanceof GoogleApiError && err.httpStatus === 404) return null;
+    throw err;
+  }
+}

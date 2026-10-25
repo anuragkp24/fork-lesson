@@ -27,6 +27,8 @@ type Lesson = {
   description: string | null;
   topic_name: string | null;
   source_updated_at: string | null;
+  kind: string;
+  classroom_state: string | null;
   attachments: Attachment[];
 };
 
@@ -59,7 +61,7 @@ export default async function LessonsPage() {
     supabase
       .from("courses")
       .select(
-        "id, name, section, lessons(id, title, description, topic_name, source_updated_at, attachments(id, position, kind, title, url, mime_type, unsupported_type, library_file_id, publish_error))"
+        "id, name, section, lessons(id, title, description, topic_name, source_updated_at, kind, classroom_state, attachments(id, position, kind, title, url, mime_type, unsupported_type, library_file_id, publish_error))"
       )
       .eq("owner_id", user.id)
       .order("name")
@@ -114,6 +116,14 @@ export default async function LessonsPage() {
                         {lesson.title}
                       </Link>
                     </h4>
+                    {lesson.kind === "fork" && (
+                      <p className="mt-1">
+                        <span className="rounded-full bg-brand-light px-2.5 py-0.5 text-xs font-semibold text-brand">
+                          Forked lesson
+                          {lesson.classroom_state === "DRAFT" ? " · Draft" : lesson.classroom_state === "PUBLISHED" ? " · Assigned" : ""}
+                        </span>
+                      </p>
+                    )}
                     {lesson.description && (
                       <p className="mt-1 text-sm text-muted">
                         {lesson.description.length > 160 ? `${lesson.description.slice(0, 160)}…` : lesson.description}
@@ -132,7 +142,7 @@ export default async function LessonsPage() {
                             ) : (
                               <span>{att.title ?? "(untitled)"}</span>
                             )}
-                            {att.kind === "drive" &&
+                            {att.kind === "drive" && lesson.kind === "original" &&
                               (att.library_file_id ? (
                                 <a
                                   href={driveOpenUrl(att.library_file_id)}

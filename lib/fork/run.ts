@@ -5,7 +5,7 @@ import { describeFailure } from "@/lib/google/describe";
 import { copyWithFallback, createFolder, folderUsable, trashFile } from "@/lib/google/drive";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { createClient } from "@/lib/supabase/server";
-import { draftLink } from "./links";
+import { classworkLink } from "./links";
 import {
   buildMaterials,
   describeNotCopied,
@@ -30,6 +30,7 @@ type LessonRow = {
   work_type: string | null;
   max_points: number | null;
   topic_name: string | null;
+  forked_from_lesson_id: string | null;
   attachments: (ForkSourceAttachment & { position: number; mime_type: string | null })[];
 };
 
@@ -53,7 +54,7 @@ export async function runFork(input: {
   const { data: lesson } = await supabase
     .from("lessons")
     .select(
-      "id, owner_id, title, description, work_type, max_points, topic_name, attachments(id, position, kind, title, url, share_mode, mime_type, library_file_id, unsupported_type)"
+      "id, owner_id, title, description, work_type, max_points, topic_name, forked_from_lesson_id, attachments(id, position, kind, title, url, share_mode, mime_type, library_file_id, unsupported_type)"
     )
     .eq("id", lessonId)
     .maybeSingle<LessonRow>();
@@ -83,7 +84,14 @@ export async function runFork(input: {
 
   const { data: fork, error: forkError } = await admin
     .from("forks")
-    .insert({ lesson_id: lesson.id, forker_id: userId, target_course_id: course.id, topic_choice: topicChoice })
+    .insert({
+      lesson_id: lesson.id,
+      // The original, even when this lesson is someone's shared version of it.
+      root_lesson_id: lesson.forked_from_lesson_id ?? lesson.id,
+      forker_id: userId,
+      target_course_id: course.id,
+      topic_choice: topicChoice,
+    })
     .select("id")
     .single();
   if (forkError) {
@@ -178,7 +186,7 @@ export async function runFork(input: {
       ok: true,
       status,
       className: `${course.name}${course.section ? ` · ${course.section}` : ""}`,
-      alternateLink: created.alternateLink ?? draftLink(course.google_course_id, created.id),
+      alternateLink: classworkLink(course.google_course_id),
       notCopied: notCopied.map(describeNotCopied),
     };
   } catch (err) {

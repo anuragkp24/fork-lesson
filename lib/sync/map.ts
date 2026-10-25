@@ -108,25 +108,26 @@ export function mapMaterial(material: ClassroomMaterial, position: number): Mapp
   return { ...NO_ATTACHMENT, position, kind: "unsupported", unsupported_type: "other" };
 }
 
+// The lesson for a piece of courseWork, whoever it is assigned to.
+export function mapLesson(work: ClassroomCourseWork): MappedLesson {
+  return {
+    google_coursework_id: work.id,
+    title: work.title?.trim() || "(untitled)",
+    description: work.description?.trim() || null,
+    work_type: work.workType ?? null,
+    max_points: typeof work.maxPoints === "number" ? work.maxPoints : null,
+    topic_id: work.topicId ?? null,
+    source_updated_at: work.updateTime ?? null,
+    attachments: (work.materials ?? []).map(mapMaterial),
+  };
+}
+
 export function mapCourseWork(work: ClassroomCourseWork): MapResult {
   if (work.state && work.state !== "PUBLISHED") return { status: "skipped", reason: "not_published" };
   if (work.assigneeMode === "INDIVIDUAL_STUDENTS") {
     return { status: "skipped", reason: "individual_students" };
   }
-
-  return {
-    status: "ok",
-    lesson: {
-      google_coursework_id: work.id,
-      title: work.title?.trim() || "(untitled)",
-      description: work.description?.trim() || null,
-      work_type: work.workType ?? null,
-      max_points: typeof work.maxPoints === "number" ? work.maxPoints : null,
-      topic_id: work.topicId ?? null,
-      source_updated_at: work.updateTime ?? null,
-      attachments: (work.materials ?? []).map(mapMaterial),
-    },
-  };
+  return { status: "ok", lesson: mapLesson(work) };
 }
 
 type KeyFields = Pick<MappedAttachment, "kind" | "drive_file_id" | "url" | "position">;

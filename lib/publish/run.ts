@@ -26,6 +26,7 @@ export async function publishLibrary(userId: string, domain: string, token: stri
       .from("lessons")
       .select("id, courses!inner(shared), attachments(id, kind, title, drive_file_id, mime_type, library_file_id)")
       .eq("owner_id", userId)
+      .eq("kind", "original")
       .eq("hidden", false)
       .eq("courses.shared", true);
     if (error) throw error;

@@ -1,17 +1,11 @@
 import "server-only";
-import {
-  GoogleApiError,
-  getDriveMimeType,
-  listCourseWork,
-  listCourses,
-  listTopics,
-} from "@/lib/google/classroom";
+import { GoogleApiError, listCourseWork, listCourses, listTopics } from "@/lib/google/classroom";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { attachmentKeys, mapCourseWork, type MappedAttachment } from "./map";
+import { syncAttachments } from "./attachments";
+import { syncForks } from "./fork-sync";
+import { mapCourseWork } from "./map";
 
 type Admin = ReturnType<typeof createAdminClient>;
-
-type ExistingAttachment = MappedAttachment & { id: string; mime_type: string | null };
 
 function failureText(err: unknown): string {
   if (err instanceof GoogleApiError) {
@@ -113,8 +107,19 @@ async function syncCourse(
   await (topics.length ? staleTopics.not("google_topic_id", "in", inList(topics.map((t) => t.topicId))) : staleTopics);
   const topicName = new Map(topics.map((t) => [t.topicId, t.name ?? null]));
 
-  // Lessons: whole-class, published only
-  const mapped = courseWork.flatMap((work) => {
+  // Forks we created are tracked separately (and never published); the rest
+  // are the teacher's own lessons: whole-class, published only.
+  const { regular, keepIds } = await syncForks({
+    admin,
+    userId,
+    domain,
+    token,
+    courseId,
+    googleCourseId,
+    courseWork,
+    topicName,
+  });
+  const mapped = regular.flatMap((work) => {
     const result = mapCourseWork(work);
     return result.status === "ok" ? [result.lesson] : [];
   });
@@ -147,60 +152,14 @@ async function syncCourse(
     }
   }
 
-  // Lessons no longer published, or now for individual students
+  // Lessons no longer published, or now for individual students. Forks we
+  // are tracking are kept.
+  const seen = [...mapped.map((l) => l.google_coursework_id), ...keepIds];
   const stale = admin.from("lessons").delete().eq("course_id", courseId);
-  const { error: pruneError } = mapped.length
-    ? await stale.not("google_coursework_id", "in", inList(mapped.map((l) => l.google_coursework_id)))
+  const { error: pruneError } = seen.length
+    ? await stale.not("google_coursework_id", "in", inList(seen))
     : await stale;
   if (pruneError) throw pruneError;
 
   return mapped.length;
-}
-
-// Updates the rows a lesson already has (matched by attachmentKeys) so later
-// slices keep their library copies, adds new ones and removes gone ones.
-async function syncAttachments(admin: Admin, token: string, lessonId: string, incoming: MappedAttachment[]) {
-  const { data, error } = await admin
-    .from("attachments")
-    .select("id, position, kind, title, url, drive_file_id, share_mode, unsupported_type, mime_type")
-    .eq("lesson_id", lessonId);
-  if (error) throw error;
-
-  const existing = (data ?? []) as ExistingAttachment[];
-  const existingByKey = new Map(attachmentKeys(existing).map((key, i) => [key, existing[i]]));
-  const keys = attachmentKeys(incoming);
-  const matched = new Set<string>();
-
-  const withMime = await Promise.all(
-    incoming.map(async (att, i) => {
-      const old = existingByKey.get(keys[i]);
-      if (att.kind !== "drive") return { att, old, mime: null };
-      const mime = old?.mime_type ?? (await getDriveMimeType(att.drive_file_id!, token));
-      return { att, old, mime };
-    })
-  );
-
-  const toInsert: object[] = [];
-  for (const { att, old, mime } of withMime) {
-    if (old) {
-      matched.add(old.id);
-      const { error: updateError } = await admin
-        .from("attachments")
-        .update({ ...att, mime_type: mime })
-        .eq("id", old.id);
-      if (updateError) throw updateError;
-    } else {
-      toInsert.push({ ...att, lesson_id: lessonId, mime_type: mime });
-    }
-  }
-  if (toInsert.length) {
-    const { error: insertError } = await admin.from("attachments").insert(toInsert);
-    if (insertError) throw insertError;
-  }
-
-  const gone = existing.filter((e) => !matched.has(e.id)).map((e) => e.id);
-  if (gone.length) {
-    const { error: deleteError } = await admin.from("attachments").delete().in("id", gone);
-    if (deleteError) throw deleteError;
-  }
 }

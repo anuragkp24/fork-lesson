@@ -98,7 +98,7 @@ export function ForkDialog({
           <div className="flex flex-col gap-4">
             <h2 className="text-2xl font-bold">Draft created in {done.className}</h2>
             <p className="text-muted">
-              It&apos;s a draft with no due date. Students can&apos;t see it until you post it.
+              Your draft is in Classwork for {done.className}. Click it there to set a due date and assign.
             </p>
             {done.notCopied.length > 0 && (
               <div className="rounded-[10px] border border-accent bg-chip-slides p-3 text-sm text-chip-slides-ink">

@@ -31,6 +31,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
     .select(
       "id, owner_id, title, description, topic_name, source_updated_at, teacher:users(name, email), course:courses(name, section), attachments(kind, mime_type, unsupported_type)"
     )
+    .eq("kind", "original")
     .eq("hidden", false)
     .order("source_updated_at", { ascending: false, nullsFirst: false })
     .limit(300)
