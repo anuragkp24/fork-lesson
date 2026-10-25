@@ -2,6 +2,7 @@ import "server-only";
 import { copyWithFallback, createFolder, ensureDomainReader, folderUsable, getFileInfo } from "@/lib/google/drive";
 import { describeFailure } from "@/lib/google/describe";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchCardThumbnails } from "./thumbnails";
 
 const LIBRARY_FOLDER_NAME = "Fork Lesson library";
 
@@ -56,6 +57,9 @@ export async function publishLibrary(userId: string, domain: string, token: stri
     console.error("[publish] failed", { userId, error: describeFailure(err) });
     folderError = `Couldn't set up the Fork Lesson library: ${describeFailure(err)}.`;
   }
+
+  // Card pictures, from the library copies. Read-only on Google; never fails the sync.
+  await fetchCardThumbnails(admin, userId, token);
 
   // published_count = Drive files from this teacher's lessons that are in the library
   const { count } = await admin

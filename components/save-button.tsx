@@ -3,10 +3,13 @@
 import { useState } from "react";
 import { setSaved } from "@/app/library/actions";
 
-const HEART = "M12 21s-8-4.9-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 10c0 6.1-8 11-8 11z";
+const BOOKMARK = "M6.5 3.5h11a1 1 0 0 1 1 1v16l-6.5-4-6.5 4v-16a1 1 0 0 1 1-1z";
+const CHECK = "M5 12.5l4.5 4.5L19 7.5";
 
-// The heart. Toggles at once and undoes itself if the save fails. Only for
-// someone else's original lesson. "card" sits on top of a stretched card link.
+// The Save pill: bookmark + "Save", or a filled green "✓ Saved". Toggles at
+// once and undoes itself if the save fails. Only for someone else's original
+// lesson. "card" sits on a Library, Saved or My lessons card (above its
+// stretched link); "header" is the larger one on the lesson page.
 export function SaveButton({
   lessonId,
   initialSaved,
@@ -32,45 +35,36 @@ export function SaveButton({
     }
   }
 
-  const icon = (
-    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
-      <path d={HEART} fill={saved ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
-    </svg>
-  );
-
-  if (variant === "header") {
-    return (
-      <>
-        <button
-          type="button"
-          onClick={toggle}
-          aria-pressed={saved}
-          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[10px] border border-line bg-white px-5 text-[15px] font-semibold text-ink transition-colors hover:bg-brand-light"
-        >
-          <span className={saved ? "text-danger" : "text-muted"}>{icon}</span>
-          {saved ? "Saved" : "Save for later"}
-        </button>
-        {error && (
-          <span role="alert" className="text-sm text-danger">
-            Couldn&apos;t save. Try again.
-          </span>
-        )}
-      </>
-    );
-  }
+  const size = variant === "header" ? "min-h-11 px-5 text-[15px] gap-2" : "px-2.5 py-1 text-xs gap-1.5";
+  const look = saved
+    ? "border-brand bg-brand text-white hover:bg-brand-dark"
+    : error
+      ? "border-danger bg-white text-danger"
+      : "border-[#d6ddd8] bg-white text-[#3d4742] hover:bg-brand-light";
 
   return (
-    <button
-      type="button"
-      onClick={toggle}
-      aria-pressed={saved}
-      aria-label={saved ? "Saved" : "Save for later"}
-      title={error ? "Couldn't save. Try again." : saved ? "Saved" : "Save for later"}
-      className={`relative z-10 flex size-11 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-brand-light ${
-        error ? "text-danger" : saved ? "text-danger" : "text-muted"
-      }`}
-    >
-      {icon}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-pressed={saved}
+        title={error ? "Couldn't save. Try again." : undefined}
+        className={`relative z-10 inline-flex items-center justify-center rounded-full border font-semibold transition-colors before:absolute before:-inset-2 before:content-[''] ${size} ${look}`}
+      >
+        <svg width={variant === "header" ? 18 : 14} height={variant === "header" ? 18 : 14} viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
+          {saved ? (
+            <path d={CHECK} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+          ) : (
+            <path d={BOOKMARK} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+          )}
+        </svg>
+        {saved ? "Saved" : "Save"}
+      </button>
+      {error && variant === "header" && (
+        <span role="alert" className="text-sm text-danger">
+          Couldn&apos;t save. Try again.
+        </span>
+      )}
+    </>
   );
 }

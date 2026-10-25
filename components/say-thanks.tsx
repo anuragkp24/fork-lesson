@@ -2,7 +2,6 @@
 
 import { useRef, useState } from "react";
 import { ThanksForm } from "@/components/thanks-form";
-import { btnSecondary } from "@/lib/ui";
 
 // "Say thanks" for a fork that hasn't thanked yet: opens the thanks form in a
 // small dialog. After Send it reads "Thanks sent ✓", final.
@@ -21,7 +20,7 @@ export function SayThanks({ forkId, authorName }: { forkId: string; authorName: 
           setOpen(true);
           dialog.current?.showModal();
         }}
-        className={`${btnSecondary} relative z-10 min-h-9 px-3.5 text-sm`}
+        className="relative z-10 rounded-full border border-[#d6ddd8] bg-white px-2.5 py-1 text-xs font-semibold text-[#3d4742] transition-colors hover:bg-brand-light"
       >
         Say thanks
       </button>
@@ -52,7 +51,7 @@ export function SayThanks({ forkId, authorName }: { forkId: string; authorName: 
 
 export function ThanksSent() {
   return (
-    <span role="status" className="inline-flex items-center text-sm font-semibold text-brand">
+    <span role="status" className="inline-flex items-center text-xs font-semibold text-brand">
       Thanks sent ✓
     </span>
   );

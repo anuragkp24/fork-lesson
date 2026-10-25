@@ -14,6 +14,8 @@ import { drivePreviewUrl } from "@/lib/library/links";
 import { logQueryError } from "@/lib/supabase/log";
 import { createClient, getUser } from "@/lib/supabase/server";
 import { attachmentLabel } from "@/lib/sync/map";
+import { attachmentThumbnailSrc } from "@/lib/cards/thumbnail";
+import { FilePreview } from "@/components/file-preview";
 import { card } from "@/lib/ui";
 import { ForkDialog, type ForkClass, type ForkItem } from "./fork-dialog";
 
@@ -37,6 +39,8 @@ type LessonDetail = {
     unsupported_type: string | null;
     library_file_id: string | null;
     publish_error: string | null;
+    thumbnail_path: string | null;
+    thumbnail_version: string | null;
   }[];
 };
 
@@ -49,7 +53,7 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
   const { data: lesson, error: lessonError } = await supabase
     .from("lessons")
     .select(
-      "id, owner_id, kind, forked_from_lesson_id, title, description, topic_name, teacher:users!lessons_owner_id_fkey(name, email), course:courses(name, section), attachments(id, position, kind, title, url, mime_type, unsupported_type, library_file_id, publish_error)"
+      "id, owner_id, kind, forked_from_lesson_id, title, description, topic_name, teacher:users!lessons_owner_id_fkey(name, email), course:courses(name, section), attachments(id, position, kind, title, url, mime_type, unsupported_type, library_file_id, publish_error, thumbnail_path, thumbnail_version)"
     )
     .eq("id", id)
     .maybeSingle<LessonDetail>();
@@ -100,6 +104,9 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
   const forked = forkedLabel(counts?.forks ?? 0);
   const taught = isOwner ? taughtLabel(counts?.taught) : null;
   const attachments = [...lesson.attachments].sort((a, b) => a.position - b.position);
+  // Drive files in the library get a large preview; everything else keeps its row.
+  const previews = attachments.filter((a) => a.kind === "drive" && a.library_file_id);
+  const rows = attachments.filter((a) => !(a.kind === "drive" && a.library_file_id));
 
   // Only a non-owner forks, into one of their own classes.
   let classes: ForkClass[] = [];
@@ -196,15 +203,23 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
         <section className={`${card} flex flex-col gap-3 p-6`}>
           <h2 className="text-lg font-bold">Attachments</h2>
           {attachments.length === 0 && <p className="text-muted">No attachments.</p>}
+          {previews.length > 0 && (
+            <ul className="grid gap-4 sm:grid-cols-2">
+              {previews.map((att) => (
+                <li key={att.id}>
+                  <FilePreview
+                    href={drivePreviewUrl(att.library_file_id!, att.mime_type)}
+                    src={att.thumbnail_path ? attachmentThumbnailSrc(att.id, att.thumbnail_version) : null}
+                    label={attachmentLabel(att)}
+                    title={att.title ?? "(untitled)"}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
           <ul className="flex flex-col gap-3">
-            {attachments.map((att) => {
-              // Drive files: everyone opens the library copy, read-only.
-              const href =
-                att.kind === "drive"
-                  ? att.library_file_id
-                    ? drivePreviewUrl(att.library_file_id, att.mime_type)
-                    : null
-                  : att.url;
+            {rows.map((att) => {
+              const href = att.kind === "drive" ? null : att.url;
               return (
                 <li key={att.id} className="flex flex-wrap items-center gap-2">
                   <FileChip label={attachmentLabel(att)} />

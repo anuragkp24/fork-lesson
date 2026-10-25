@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { AppHeader } from "@/components/app-header";
-import { ForkBadge } from "@/components/fork-badge";
-import { LIBRARY_LESSON_SELECT, LessonCard, LibraryCard, type LibraryLesson } from "@/components/lesson-card";
+import { ForkedCount, LIBRARY_LESSON_SELECT, LessonCard, LibraryCard, type LibraryLesson } from "@/components/lesson-card";
 import { SayThanks, ThanksSent } from "@/components/say-thanks";
+import type { MediaAttachment } from "@/lib/cards/media";
 import { getAccessToken } from "@/lib/google/access-token";
 import { topTags } from "@/lib/hub/tags";
 import { forkThanksState, thanksBadge } from "@/lib/hub/thanks";
@@ -25,6 +25,8 @@ type Attachment = {
   unsupported_type: string | null;
   library_file_id: string | null;
   publish_error: string | null;
+  thumbnail_path: string | null;
+  thumbnail_version: string | null;
 };
 
 type Lesson = {
@@ -76,7 +78,7 @@ export default async function LessonsPage({ searchParams }: { searchParams: Prom
   return (
     <>
       <AppHeader current="lessons" />
-      <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-8 px-5 py-10">
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-8 px-5 py-10">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="flex flex-col gap-1">
             <h1 className="text-3xl font-bold">My lessons</h1>
@@ -168,10 +170,10 @@ async function SavedLessons({ userId }: { userId: string }) {
   const tagCounts = (tagRows ?? []) as { lesson_id: string; tag: string; n: number }[];
 
   if (lessons.length === 0) {
-    return <p className="text-sm text-muted">Tap the heart on any lesson in the Library to save it here.</p>;
+    return <p className="text-sm text-muted">Tap Save on any lesson in the Library to keep it here.</p>;
   }
   return (
-    <ul className="grid gap-4 sm:grid-cols-2">
+    <ul className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
       {lessons.map((lesson) => (
         <li key={lesson.id}>
           <LibraryCard
@@ -193,7 +195,7 @@ async function MyLessons({ userId, showEmptyNote }: { userId: string; showEmptyN
   const { data: courses, error: coursesError } = await supabase
     .from("courses")
     .select(
-      "id, name, section, lessons(id, title, description, topic_name, source_updated_at, kind, classroom_state, fork_id, forked_from_lesson_id, attachments(id, position, kind, title, url, mime_type, unsupported_type, library_file_id, publish_error))"
+      "id, name, section, lessons(id, title, description, topic_name, source_updated_at, kind, classroom_state, fork_id, forked_from_lesson_id, attachments(id, position, kind, title, url, mime_type, unsupported_type, library_file_id, publish_error, thumbnail_path, thumbnail_version))"
     )
     .eq("owner_id", userId)
     .order("name")
@@ -210,11 +212,17 @@ async function MyLessons({ userId, showEmptyNote }: { userId: string; showEmptyN
   const { data: originals, error: originalsError } = originalIds.length
     ? await supabase
         .from("lessons")
-        .select("id, teacher:users!lessons_owner_id_fkey(name, email)")
+        .select(
+          "id, teacher:users!lessons_owner_id_fkey(name, email), attachments(kind, mime_type, url, position, library_file_id, thumbnail_path, thumbnail_version)"
+        )
         .in("id", originalIds)
-        .returns<{ id: string; teacher: { name: string | null; email: string } | null }[]>()
+        .returns<
+          { id: string; teacher: { name: string | null; email: string } | null; attachments: MediaAttachment[] }[]
+        >()
     : { data: [], error: null };
   logQueryError("my lessons originals", originalsError);
+  // A fork card shows the original's picture.
+  const originalAttachments = new Map((originals ?? []).map((o) => [o.id, o.attachments]));
   const originalTeacher = new Map(
     (originals ?? []).map((o) => [o.id, o.teacher?.name ?? o.teacher?.email ?? null])
   );
@@ -256,7 +264,7 @@ async function MyLessons({ userId, showEmptyNote }: { userId: string; showEmptyN
           {groupByTopic([...course.lessons].sort(newestFirst)).map(([topic, lessons]) => (
             <div key={topic ?? "(none)"} className="flex flex-col gap-3">
               <h3 className="text-xs font-bold uppercase tracking-wider text-muted">{topic ?? "No topic"}</h3>
-              <ul className="grid gap-4 sm:grid-cols-2">
+              <ul className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
                 {lessons.map((lesson) => {
                   const isFork = lesson.kind === "fork";
                   const originalId = lesson.forked_from_lesson_id;
@@ -274,6 +282,7 @@ async function MyLessons({ userId, showEmptyNote }: { userId: string; showEmptyN
                         forkOk: !!lesson.fork_id && (forkWorked.get(lesson.fork_id) ?? false),
                       })
                     : null;
+                                  const originalPictures = isFork && originalId ? originalAttachments.get(originalId) : undefined;
                   const authorName = firstName(originalTeacher.get(originalId ?? "")) ?? "the author";
 
                   return (
@@ -281,44 +290,56 @@ async function MyLessons({ userId, showEmptyNote }: { userId: string; showEmptyN
                       <LessonCard
                         href={href}
                         title={lesson.title}
-                        description={lesson.description}
+                        classLine={`${course.name}${course.section ? ` · ${course.section}` : ""}`}
+                        course={course.name}
+                        teacher={
+                          isFork
+                            ? originalVisible
+                              ? `Forked from ${originalTeacher.get(originalId ?? "") ?? "a teacher"}`
+                              : "Forked from a lesson that's no longer shared"
+                            : null
+                        }
+                        isYou={!isFork}
+                        topic={isFork ? null : lesson.topic_name}
                         attachments={lesson.attachments}
-                        forkCount={isFork ? 0 : (own?.forks ?? 0)}
-                        badges={
-                          <>
-                            {isFork && <ForkBadge originalId={originalId} teacher={originalTeacher.get(originalId ?? "") ?? null} />}
-                            {status && (
-                              <span
-                                className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                                  lesson.classroom_state === "PUBLISHED"
-                                    ? "bg-chip-sheet text-chip-sheet-ink"
-                                    : "bg-chip-slides text-chip-slides-ink"
-                                }`}
-                              >
-                                {status}
-                              </span>
-                            )}
-                            {badge && (
-                              <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-light px-2.5 py-0.5 text-xs font-semibold text-brand">
+                        lessonId={lesson.id}
+                        pictureLessonId={originalPictures ? originalId! : undefined}
+                        pictureAttachments={originalPictures}
+                        notice={
+                          problem && (
+                            <Link href={`/lesson/${lesson.id}`} className="relative z-10 truncate text-xs font-semibold text-danger underline">
+                              {problem}
+                            </Link>
+                          )
+                        }
+                        footerLeft={
+                          isFork ? (
+                            status && <span className="text-muted">{status}</span>
+                          ) : (
+                            badge && (
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-light px-2 py-px font-semibold text-brand">
                                 {badge.label}
                                 {badge.hasNew && (
                                   <>
-                                    <span aria-hidden="true" className="size-2 rounded-full bg-danger" />
+                                    <span aria-hidden="true" className="size-[7px] rounded-full bg-brand" />
                                     <span className="sr-only">{badge.newCount} new</span>
                                   </>
                                 )}
                               </span>
-                            )}
-                            {problem && (
-                              <Link href={`/lesson/${lesson.id}`} className="text-xs font-semibold text-danger underline">
-                                {problem}
-                              </Link>
-                            )}
-                            {thanks === "sent" && <ThanksSent />}
-                            {thanks === "can-thank" && lesson.fork_id && (
-                              <SayThanks forkId={lesson.fork_id} authorName={authorName} />
-                            )}
-                          </>
+                            )
+                          )
+                        }
+                        footerRight={
+                          isFork ? (
+                            <>
+                              {thanks === "sent" && <ThanksSent />}
+                              {thanks === "can-thank" && lesson.fork_id && (
+                                <SayThanks forkId={lesson.fork_id} authorName={authorName} />
+                              )}
+                            </>
+                          ) : (
+                            <ForkedCount count={own?.forks ?? 0} />
+                          )
                         }
                       />
                     </li>

@@ -37,7 +37,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
 
   // "What teachers like" for every card in one call (anonymous counts), and the
   // lessons I've saved (my own rows only). If either fails the cards just
-  // show no chips or hollow hearts.
+  // show no chips or an unsaved Save button.
   const [{ data: tagRows, error: tagError }, { data: savedRows, error: savedError }] = await Promise.all([
     supabase.rpc("lesson_tag_counts", { ids: all.map((l) => l.id) }),
     supabase.from("saved_lessons").select("lesson_id"),
@@ -61,7 +61,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
   return (
     <>
       <AppHeader current="library" />
-      <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 px-5 py-10">
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-5 py-10">
         <div className="flex flex-col gap-1">
           <h1 className="text-3xl font-bold">Library</h1>
           <p className="text-muted">Lessons shared by teachers in your district. Fork one into your own class.</p>
@@ -113,7 +113,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
             {group.classes.map((cls) => (
               <div key={cls.label} className="flex flex-col gap-3">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-muted">{cls.label}</h3>
-                <ul className="grid gap-4 sm:grid-cols-2">
+                <ul className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
                   {cls.lessons.map((lesson) => (
                     <li key={lesson.id}>
                       <LibraryCard

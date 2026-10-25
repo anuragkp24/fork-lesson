@@ -1,6 +1,7 @@
 import "server-only";
 import { randomUUID } from "crypto";
 import { GoogleApiError, apiError } from "./classroom";
+import { isAllowedThumbnailUrl } from "@/lib/cards/thumbnail";
 import { multipartBody, reuploadPlan } from "./drive-format";
 
 // Drive calls for the library folder. These WRITE to the signed-in teacher's
@@ -151,4 +152,77 @@ export async function copyWithFallback(
     const type = mimeType ?? (await getFileInfo(fileId, token)).mimeType;
     return { id: await reuploadFile(fileId, name, type, folderId, token), method: "reupload" };
   }
+}
+
+// Read-only: whether Drive has a picture for a file yet, and where. The link
+// is short-lived and only works with a credentialed request.
+export async function getThumbnailInfo(
+  fileId: string,
+  token: string
+): Promise<{ hasThumbnail: boolean; thumbnailLink: string | null; thumbnailVersion: string | null }> {
+  const response = await driveFetch(
+    withParams(`${FILES}/${encodeURIComponent(fileId)}`, { fields: "hasThumbnail,thumbnailLink,thumbnailVersion" }),
+    token
+  );
+  const body = (await response.json()) as { hasThumbnail?: boolean; thumbnailLink?: string; thumbnailVersion?: string };
+  return {
+    hasThumbnail: !!body.hasThumbnail,
+    thumbnailLink: body.thumbnailLink ?? null,
+    thumbnailVersion: body.thumbnailVersion ?? null,
+  };
+}
+
+const THUMBNAIL_MAX_BYTES = 1024 * 1024;
+const THUMBNAIL_MAX_REDIRECTS = 2;
+
+// Downloads a picture from a thumbnailLink with the teacher's token. Only
+// https googleusercontent.com hosts (redirects included), only image types,
+// at most 1 MB. Returns null for anything else; never throws on bad content.
+export async function fetchThumbnail(
+  link: string,
+  token: string
+): Promise<{ bytes: Uint8Array; contentType: string } | null> {
+  let url = link;
+  for (let hops = 0; hops <= THUMBNAIL_MAX_REDIRECTS; hops++) {
+    if (!isAllowedThumbnailUrl(url)) return null;
+    const response = await fetch(url, {
+      cache: "no-store",
+      redirect: "manual",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (response.status >= 300 && response.status < 400) {
+      const next = response.headers.get("location");
+      if (!next) return null;
+      url = new URL(next, url).toString();
+      continue;
+    }
+    if (!response.ok) throw await apiError(response);
+
+    const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    if (!/^image\/(png|jpeg|gif|webp)$/.test(contentType)) return null;
+    const declared = Number(response.headers.get("content-length") ?? 0);
+    if (declared > THUMBNAIL_MAX_BYTES || !response.body) return null;
+
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    const reader = response.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.length;
+      if (total > THUMBNAIL_MAX_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return { bytes, contentType };
+  }
+  return null;
 }
