@@ -11,7 +11,9 @@ import { myForkStatus } from "@/lib/library/forks";
 import { hasForkableAttachment } from "@/lib/library/qualifies";
 import { lessonsTab, publishProblemLabel } from "@/lib/library/tabs";
 import { logQueryError } from "@/lib/supabase/log";
-import { createClient, getUser } from "@/lib/supabase/server";
+import { prefillClass } from "@/lib/onboarding/prefill";
+import { requireOnboarded } from "@/lib/onboarding/require";
+import { createClient } from "@/lib/supabase/server";
 import { alertError } from "@/lib/ui";
 import { needsSync, syncedAgo } from "@/lib/sync/schedule";
 import { syncAction } from "./actions";
@@ -52,6 +54,10 @@ type Course = {
   section: string | null;
   shared: boolean;
   share_decided: boolean;
+  classroom_subject: string | null;
+  classroom_levels: string | null;
+  subject: string | null;
+  grade: string | null;
   lessons: Lesson[];
 };
 
@@ -91,7 +97,7 @@ const TAB = "inline-flex min-h-11 items-center border-b-2 px-4 text-[15px] font-
 
 export default async function LessonsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const tab = lessonsTab((await searchParams).tab);
-  const user = (await getUser())!;
+  const user = await requireOnboarded();
   // The signed-in client, so row level security decides what comes back.
   const supabase = await createClient();
 
@@ -112,7 +118,7 @@ export default async function LessonsPage({ searchParams }: { searchParams: Prom
 
   return (
     <>
-      <AppHeader current="lessons" />
+      <AppHeader current="lessons" profile={user} />
       <AutoRefresh active={syncing} />
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-8 px-5 py-10">
         <div className="flex flex-wrap items-end justify-between gap-4">
@@ -227,13 +233,27 @@ async function SavedLessons({ userId }: { userId: string }) {
   );
 }
 
+function ClassSharePrompt({ course }: { course: Course }) {
+  const start = prefillClass(course);
+  return (
+    <SharePrompt
+      courseId={course.id}
+      label={`${course.name}${course.section ? ` · ${course.section}` : ""}`}
+      subject={start.subject.value ?? ""}
+      subjectPrefilled={start.subject.source !== null}
+      grade={start.grade.value ?? ""}
+      gradePrefilled={start.grade.source !== null}
+    />
+  );
+}
+
 async function MyLessons({ userId, showEmptyNote }: { userId: string; showEmptyNote: boolean }) {
   const supabase = await createClient();
 
   const { data: courses, error: coursesError } = await supabase
     .from("courses")
     .select(
-      "id, name, section, shared, share_decided, lessons(id, title, description, topic_name, source_updated_at, kind, classroom_state, fork_id, forked_from_lesson_id, attachments(id, position, kind, title, url, mime_type, unsupported_type, library_file_id, publish_error, thumbnail_path, thumbnail_version))"
+      "id, name, section, shared, share_decided, classroom_subject, classroom_levels, subject, grade, lessons(id, title, description, topic_name, source_updated_at, kind, classroom_state, fork_id, forked_from_lesson_id, attachments(id, position, kind, title, url, mime_type, unsupported_type, library_file_id, publish_error, thumbnail_path, thumbnail_version))"
     )
     .eq("owner_id", userId)
     .order("name")
@@ -298,7 +318,7 @@ async function MyLessons({ userId, showEmptyNote }: { userId: string; showEmptyN
             {course.name}
             {course.section && <span className="text-base font-medium text-muted">{course.section}</span>}
           </h2>
-          {!course.share_decided && <SharePrompt courseId={course.id} />}
+          {!course.share_decided && <ClassSharePrompt course={course} />}
           {course.lessons.length === 0 && <p className="text-sm text-muted">No lessons in this class.</p>}
           {groupByTopic([...course.lessons].sort(newestFirst)).map(([topic, lessons]) => (
             <div key={topic ?? "(none)"} className="flex flex-col gap-3">

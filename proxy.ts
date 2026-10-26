@@ -1,9 +1,11 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { NEXT_COOKIE } from "@/lib/onboarding/gate";
 
 type CookieToSet = { name: string; value: string; options?: Parameters<NextResponse["cookies"]["set"]>[2] };
 
-const PROTECTED_ROUTES = ["/lessons", "/library", "/lesson"];
+const PROTECTED_ROUTES = ["/lessons", "/library", "/lesson", "/welcome"];
+
 
 export async function proxy(request: NextRequest) {
   // Cookies to forward to the page (on the request) and to the browser (on
@@ -47,7 +49,12 @@ export async function proxy(request: NextRequest) {
     (route) => pathname === route || pathname.startsWith(`${route}/`)
   );
   if (isProtected && !user) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    const toLogin = NextResponse.redirect(new URL("/login", request.url));
+    // A link to a lesson survives sign-in and onboarding (auth callback).
+    if (pathname.startsWith("/lesson/")) {
+      toLogin.cookies.set(NEXT_COOKIE, pathname, { path: "/", maxAge: 15 * 60, httpOnly: true, sameSite: "lax" });
+    }
+    return toLogin;
   }
 
   return response;

@@ -1,5 +1,5 @@
-import { Logo } from "@/components/logo";
-import { alertError, card } from "@/lib/ui";
+import { WelcomeFrame } from "@/components/welcome-frame";
+import { alertError } from "@/lib/ui";
 import { SignInButton } from "./sign-in-button";
 
 const MESSAGES: Record<string, string> = {
@@ -9,6 +9,8 @@ const MESSAGES: Record<string, string> = {
   failed: "Something went wrong while signing in. Please try again.",
 };
 
+// Onboarding screen 1: what Fork Lesson is and what it does with the Google
+// account, before anything runs.
 export default async function LoginPage({
   searchParams,
 }: {
@@ -18,26 +20,29 @@ export default async function LoginPage({
   const message = MESSAGES[error ?? (reconnect ? "reconnect" : "")];
 
   return (
-    <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-6 px-5 py-16">
-      <div className="flex items-center gap-2.5">
-        <Logo size={36} />
-        <span className="font-heading text-xl font-bold tracking-tight">Fork Lesson</span>
+    <WelcomeFrame step={1}>
+      <h1 className="text-[22px] font-bold leading-tight">Use lessons your colleagues already taught</h1>
+      <p className="text-muted">
+        Find a lesson from a teacher in your district, and copy it into your own Google Classroom class as a draft,
+        files included.
+      </p>
+      <div className="rounded-[10px] bg-[#f6f8f7] px-3.5 py-3 text-[13px]">
+        <p className="font-bold">What Fork Lesson does with your Google account</p>
+        <ul className="ml-[18px] mt-1.5 list-disc">
+          <li className="my-1">Reads your classes and posted assignments.</li>
+          <li className="my-1">
+            Only for classes you choose to share: puts a <b>copy</b> of their files in a &ldquo;Fork Lesson library&rdquo;
+            folder that teachers in your district can view. Your originals are never changed.
+          </li>
+          <li className="my-1">Never reads student work, grades or rosters.</li>
+        </ul>
       </div>
-      <div className={`${card} flex flex-col gap-5 p-6`}>
-        <div className="flex flex-col gap-2">
-          <h1 className="text-3xl font-bold leading-tight">Don&apos;t rebuild a lesson a colleague already made.</h1>
-          <p className="text-muted">
-            Browse lessons from teachers in your district, then fork one into your own Google Classroom class as a
-            draft.
-          </p>
-        </div>
-        {message && (
-          <p role="alert" className={alertError}>
-            {message}
-          </p>
-        )}
-        <SignInButton />
-      </div>
-    </main>
+      {message && (
+        <p role="alert" className={alertError}>
+          {message}
+        </p>
+      )}
+      <SignInButton />
+    </WelcomeFrame>
   );
 }

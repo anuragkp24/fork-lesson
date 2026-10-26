@@ -12,7 +12,8 @@ import { forkThanksState } from "@/lib/hub/thanks";
 import { firstName, initials } from "@/lib/initials";
 import { drivePreviewUrl } from "@/lib/library/links";
 import { logQueryError } from "@/lib/supabase/log";
-import { createClient, getUser } from "@/lib/supabase/server";
+import { requireOnboarded } from "@/lib/onboarding/require";
+import { createClient } from "@/lib/supabase/server";
 import { attachmentLabel } from "@/lib/sync/map";
 import { attachmentThumbnailSrc } from "@/lib/cards/thumbnail";
 import { FilePreview } from "@/components/file-preview";
@@ -46,7 +47,7 @@ type LessonDetail = {
 
 export default async function LessonPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const user = (await getUser())!;
+  const user = await requireOnboarded(`/lesson/${id}`);
   const supabase = await createClient();
 
   // Row level security hides lessons I'm not allowed to see, so they 404.
@@ -137,7 +138,7 @@ export default async function LessonPage({ params }: { params: Promise<{ id: str
 
   return (
     <>
-      <AppHeader current={isOwner ? "lessons" : "library"} />
+      <AppHeader current={isOwner ? "lessons" : "library"} profile={user} />
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-5 py-10">
         <Link
           href={isOwner ? "/lessons" : "/library"}

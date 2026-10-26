@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
   const startedAt = Date.now();
   const admin = createAdminClient();
   const [{ data: users, error: usersError }, { data: states, error: statesError }] = await Promise.all([
-    admin.from("users").select("id, domain"),
+    admin.from("users").select("id, domain, onboarded_at"),
     admin.from("sync_state").select("user_id, last_started_at, last_finished_at, last_error"),
   ]);
   if (usersError || statesError) {
@@ -40,6 +40,8 @@ export async function GET(request: NextRequest) {
 
   const stateById = new Map((states ?? []).map((s) => [s.user_id, s]));
   const domainById = new Map((users ?? []).map((u) => [u.id, u.domain]));
+  // A teacher still onboarding hasn't chosen what to share: read only.
+  const onboarded = new Set((users ?? []).filter((u) => u.onboarded_at).map((u) => u.id));
   const rows = (users ?? []).map((u) => {
     const s = stateById.get(u.id);
     return {
@@ -54,7 +56,7 @@ export async function GET(request: NextRequest) {
   let synced = 0;
   for (const row of picked) {
     if (Date.now() - startedAt > START_BUDGET_MS) break;
-    await syncNow(row.userId, domainById.get(row.userId)!, "nightly");
+    await syncNow(row.userId, domainById.get(row.userId)!, "nightly", { publish: onboarded.has(row.userId) });
     synced += 1;
   }
 

@@ -48,7 +48,9 @@ async function listAll<T>(base: string, key: string, params: Record<string, stri
 
 const CLASSROOM = "https://classroom.googleapis.com/v1";
 
-export type ClassroomCourse = { id: string; name?: string; section?: string };
+// subject and levels: free text from the class settings, often empty. They
+// prefill the onboarding screen.
+export type ClassroomCourse = { id: string; name?: string; section?: string; subject?: string; levels?: string };
 export type ClassroomTopic = { topicId: string; name?: string };
 
 export function listCourses(token: string) {

@@ -1,11 +1,13 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { after, NextResponse, type NextRequest } from "next/server";
 import { emailDomain } from "@/lib/domain";
+import { NEXT_COOKIE, safeNext, welcomePath, welcomeStep } from "@/lib/onboarding/gate";
 import { encrypt, getTokenKey } from "@/lib/crypto";
 import { SIGN_IN_NEEDED, SIGN_IN_REJECTED } from "@/lib/sync/schedule";
 import { missingScopes } from "@/lib/google/scopes";
 import { refreshAccessToken } from "@/lib/google/token";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
+import { syncNow } from "@/lib/sync/auto";
 
 function toLogin(request: NextRequest, query: string) {
   return NextResponse.redirect(new URL(`/login?${query}`, request.url));
@@ -66,7 +68,11 @@ export async function GET(request: NextRequest) {
   const admin = createAdminClient();
   const name = (user.user_metadata?.full_name ?? user.user_metadata?.name ?? null) as string | null;
 
-  const { error: userError } = await admin.from("users").upsert({ id: user.id, email, name, domain });
+  const { data: profile, error: userError } = await admin
+    .from("users")
+    .upsert({ id: user.id, email, name, domain })
+    .select("school_id, onboarded_at")
+    .single();
   if (userError) {
     console.error("[auth/callback] user upsert failed", { userId: user.id, code: userError.code });
     await supabase.auth.signOut();
@@ -93,5 +99,20 @@ export async function GET(request: NextRequest) {
     .eq("user_id", user.id)
     .in("last_error", [SIGN_IN_NEEDED, SIGN_IN_REJECTED]);
 
-  return NextResponse.redirect(new URL("/lessons", request.url));
+  // A lesson link the teacher opened while signed out (proxy.ts).
+  const next = safeNext(request.cookies.get(NEXT_COOKIE)?.value);
+  const step = welcomeStep({ onboardedAt: profile?.onboarded_at, schoolId: profile?.school_id });
+
+  let target = next ?? "/lessons";
+  if (step !== "done") {
+    // Onboarding: read her classes and assignments now, while she answers.
+    // Read only: nothing is copied and no pictures are fetched until she has
+    // chosen which classes to share (the classes screen starts the full sync).
+    after(() => syncNow(user.id, domain, "onboarding", { publish: false }));
+    target = welcomePath(step, next);
+  }
+
+  const response = NextResponse.redirect(new URL(target, request.url));
+  response.cookies.delete(NEXT_COOKIE);
+  return response;
 }

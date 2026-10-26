@@ -6,12 +6,13 @@ import { hasForkableAttachment } from "@/lib/library/qualifies";
 import { groupByTeacher, teacherOptions } from "@/lib/library/group";
 import { matchesQuery } from "@/lib/library/search";
 import { logQueryError } from "@/lib/supabase/log";
-import { createClient, getUser } from "@/lib/supabase/server";
+import { requireOnboarded } from "@/lib/onboarding/require";
+import { createClient } from "@/lib/supabase/server";
 import { btnPrimary, input } from "@/lib/ui";
 
 export default async function LibraryPage({ searchParams }: { searchParams: Promise<{ q?: string; teacher?: string }> }) {
   const { q = "", teacher = "" } = await searchParams;
-  const user = (await getUser())!;
+  const user = await requireOnboarded();
   // Row level security limits this to shared, unhidden lessons in my domain.
   // My own lessons live in My lessons, so they are left out here.
   const supabase = await createClient();
@@ -64,7 +65,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
 
   return (
     <>
-      <AppHeader current="library" />
+      <AppHeader current="library" profile={user} />
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-5 py-10">
         <div className="flex flex-col gap-1">
           <h1 className="text-3xl font-bold">Library</h1>

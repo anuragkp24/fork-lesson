@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { SIGN_IN_SCOPES } from "@/lib/google/scopes";
 import { createClient } from "@/lib/supabase/client";
-import { btnPrimary } from "@/lib/ui";
+import { btnSecondary } from "@/lib/ui";
 
 export function SignInButton() {
   const [busy, setBusy] = useState(false);
@@ -33,8 +33,11 @@ export function SignInButton() {
         type="button"
         onClick={signIn}
         disabled={busy}
-        className={`${btnPrimary} w-full`}
+        className={`${btnSecondary} w-full gap-2.5 border-[#d7dcd9]`}
       >
+        <span aria-hidden="true" className="text-lg font-bold text-[#4285f4]">
+          G
+        </span>
         {busy ? "Opening Google…" : "Sign in with Google"}
       </button>
       {failed && <p className="text-sm text-danger">Couldn&apos;t start sign-in. Please try again.</p>}

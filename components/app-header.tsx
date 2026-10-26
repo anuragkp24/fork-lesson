@@ -1,25 +1,18 @@
 import Link from "next/link";
 import { after } from "next/server";
 import { initials } from "@/lib/initials";
-import { createClient, getUser } from "@/lib/supabase/server";
+import type { Profile } from "@/lib/onboarding/require";
 import { syncIfStale } from "@/lib/sync/auto";
 import { btnSecondary } from "@/lib/ui";
 import { Logo } from "./logo";
 
-export async function AppHeader({ current }: { current: "lessons" | "library" | null }) {
-  const user = await getUser();
-  const supabase = await createClient();
-  const { data: profile } = user
-    ? await supabase.from("users").select("name, email, domain").eq("id", user.id).maybeSingle()
-    : { data: null };
-
+// profile comes from requireOnboarded(), which every page calls first, so
+// this only renders for a teacher who has finished onboarding.
+export function AppHeader({ current, profile }: { current: "lessons" | "library" | null; profile: Profile }) {
   // Every signed-in page keeps the teacher's library current: after the page
-  // is sent, sync in the background if the last sync is over 30 minutes old.
+  // is sent, sync in the background if the last sync is a few minutes old.
   // syncIfStale never throws, and nothing here waits for it.
-  if (user && profile?.domain) {
-    const domain = profile.domain;
-    after(() => syncIfStale(user.id, domain, "visit"));
-  }
+  after(() => syncIfStale(profile.id, profile.domain, "visit"));
 
   const tab = (active: boolean) =>
     `inline-flex min-h-11 items-center border-b-2 px-1 text-[15px] font-semibold ${
@@ -48,13 +41,13 @@ export async function AppHeader({ current }: { current: "lessons" | "library" | 
             className="flex size-11 cursor-pointer list-none items-center justify-center rounded-full bg-brand-light text-sm font-bold text-brand [&::-webkit-details-marker]:hidden"
             aria-label="Account menu"
           >
-            {initials(profile?.name, profile?.email ?? user?.email)}
+            {initials(profile.name, profile.email)}
           </summary>
           <div className="absolute right-0 z-10 mt-2 flex w-64 flex-col gap-3 rounded-card border border-line bg-white p-4 shadow-lg">
             <div className="text-sm">
-              <p className="font-semibold">{profile?.name ?? "Signed in"}</p>
-              <p className="break-all text-muted">{profile?.email ?? user?.email}</p>
-              {profile?.domain && <p className="text-muted">Sharing with {profile.domain}</p>}
+              <p className="font-semibold">{profile.name ?? "Signed in"}</p>
+              <p className="break-all text-muted">{profile.email}</p>
+              <p className="text-muted">Sharing with {profile.domain}</p>
             </div>
             <form action="/auth/signout" method="post">
               <button type="submit" className={`${btnSecondary} w-full`}>

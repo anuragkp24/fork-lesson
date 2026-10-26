@@ -1,7 +1,7 @@
 // When to sync. Pure, so it is easy to test; the database and Google calls
 // live in auto.ts.
 
-export type SyncTrigger = "manual" | "visit" | "nightly";
+export type SyncTrigger = "manual" | "visit" | "nightly" | "onboarding";
 
 // A visit syncs when the last sync finished more than this long ago. Short, so
 // a lesson posted a moment ago shows up and new pictures get picked up.

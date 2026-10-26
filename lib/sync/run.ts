@@ -64,6 +64,10 @@ export async function runSync(
           google_course_id: c.id,
           name: c.name ?? "(untitled class)",
           section: c.section ?? null,
+          // Classroom's own text, refreshed every time. The teacher's choice
+          // (subject, grade) is never sent, so it is never overwritten.
+          classroom_subject: c.subject ?? null,
+          classroom_levels: c.levels ?? null,
           ...(knownIds.has(c.id) ? {} : { shared: false, share_decided: false }),
         })),
         { onConflict: "owner_id,google_course_id" }

@@ -8,7 +8,14 @@ import { needsSync, SIGN_IN_NEEDED, type SyncTrigger } from "./schedule";
 // One full sync for one teacher, with their own token: read Classroom, copy
 // Drive files into their library folder, fetch card pictures. Never throws;
 // the outcome (including "sign in again") goes to sync_state.
-export async function syncNow(userId: string, domain: string, trigger: SyncTrigger): Promise<void> {
+// publish: false reads only (no copies, no pictures): used while a teacher is
+// onboarding, before she has chosen which classes to share.
+export async function syncNow(
+  userId: string,
+  domain: string,
+  trigger: SyncTrigger,
+  { publish = true }: { publish?: boolean } = {}
+): Promise<void> {
   const admin = createAdminClient();
   try {
     const token = await getAccessToken(userId);
@@ -22,7 +29,7 @@ export async function syncNow(userId: string, domain: string, trigger: SyncTrigg
       return;
     }
     await runSync(userId, domain, token.accessToken, trigger);
-    await publishLibrary(userId, domain, token.accessToken);
+    if (publish) await publishLibrary(userId, domain, token.accessToken);
   } catch (err) {
     console.error("[sync/auto] failed", { userId, trigger, error: err instanceof Error ? err.message : "unknown" });
   }
