@@ -2,6 +2,7 @@ import { AppHeader } from "@/components/app-header";
 import { LIBRARY_LESSON_SELECT, LibraryCard, type LibraryLesson } from "@/components/lesson-card";
 import { topTags } from "@/lib/hub/tags";
 import { initials } from "@/lib/initials";
+import { hasForkableAttachment } from "@/lib/library/qualifies";
 import { groupByTeacher, teacherOptions } from "@/lib/library/group";
 import { matchesQuery } from "@/lib/library/search";
 import { logQueryError } from "@/lib/supabase/log";
@@ -11,8 +12,8 @@ import { btnPrimary, input } from "@/lib/ui";
 export default async function LibraryPage({ searchParams }: { searchParams: Promise<{ q?: string; teacher?: string }> }) {
   const { q = "", teacher = "" } = await searchParams;
   const user = (await getUser())!;
-  // Row level security limits this to shared, unhidden lessons in my domain
-  // (plus my own).
+  // Row level security limits this to shared, unhidden lessons in my domain.
+  // My own lessons live in My lessons, so they are left out here.
   const supabase = await createClient();
 
   const { data, error } = await supabase
@@ -20,12 +21,15 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
     .select(LIBRARY_LESSON_SELECT)
     .eq("kind", "original")
     .eq("hidden", false)
+    .neq("owner_id", user.id)
     .order("source_updated_at", { ascending: false, nullsFirst: false })
     .limit(300)
     .returns<LibraryLesson[]>();
 
   logQueryError("library lessons", error);
-  const all = data ?? [];
+  // Only lessons with something to fork: a Drive file, a YouTube video or a
+  // link. Text-only lessons and Forms/add-ons-only lessons stay in My lessons.
+  const all = (data ?? []).filter((l) => hasForkableAttachment(l.attachments));
 
   // "Forked N times" per original lesson. If this lookup fails the cards just
   // show no count.

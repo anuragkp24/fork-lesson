@@ -1,32 +1,39 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { emailDomain } from "@/lib/domain";
-import { getAccessToken } from "@/lib/google/access-token";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getUser } from "@/lib/supabase/server";
-import { publishLibrary } from "@/lib/publish/run";
-import { runSync } from "@/lib/sync/run";
+import { syncNow } from "@/lib/sync/auto";
 
 export async function syncAction() {
   const user = await getUser();
   if (!user?.email) return;
 
-  const token = await getAccessToken(user.id);
-  if (token.status !== "ok") {
-    await createAdminClient().from("sync_state").upsert({
-      user_id: user.id,
-      last_finished_at: new Date().toISOString(),
-      last_error:
-        token.status === "reconnect_required"
-          ? "Google needs you to sign in again."
-          : "Couldn't reach Google. Try again in a minute.",
-    });
-  } else {
-    const domain = emailDomain(user.email);
-    await runSync(user.id, domain, token.accessToken);
-    await publishLibrary(user.id, domain, token.accessToken);
+  await syncNow(user.id, emailDomain(user.email), "manual");
+  revalidatePath("/lessons");
+}
+
+// The "Share this class with teachers in your district?" answer. Yes shares it
+// and starts a sync so its files are published; Not now keeps it private.
+export async function shareClassAction(courseId: string, share: boolean) {
+  const user = await getUser();
+  if (!user?.email) return;
+
+  const { error } = await createAdminClient()
+    .from("courses")
+    .update({ shared: share, share_decided: true })
+    .eq("id", courseId)
+    .eq("owner_id", user.id);
+  if (error) {
+    console.error("[lessons] share answer failed", { userId: user.id, code: error.code });
+    return;
   }
 
+  if (share) {
+    const domain = emailDomain(user.email);
+    after(() => syncNow(user.id, domain, "manual"));
+  }
   revalidatePath("/lessons");
 }

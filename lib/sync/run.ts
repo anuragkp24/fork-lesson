@@ -4,13 +4,14 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { syncAttachments } from "./attachments";
 import { syncForks } from "./fork-sync";
 import { mapCourseWork } from "./map";
+import { SIGN_IN_REJECTED, type SyncTrigger } from "./schedule";
 
 type Admin = ReturnType<typeof createAdminClient>;
 
 function failureText(err: unknown): string {
   if (err instanceof GoogleApiError) {
     return err.httpStatus === 401
-      ? "Google rejected the saved sign-in. Sign out and sign in again."
+      ? SIGN_IN_REJECTED
       : `Google said ${err.message.replace("Google API ", "")}.`;
   }
   return "Unexpected error while syncing.";
@@ -24,9 +25,19 @@ function inList(ids: string[]): string {
 // Pulls this teacher's active classes, topics and published whole-class
 // assignments into Supabase. Read-only on the Google side. Never throws:
 // the outcome is written to sync_state for the page to show.
-export async function runSync(userId: string, domain: string, token: string): Promise<void> {
+export async function runSync(
+  userId: string,
+  domain: string,
+  token: string,
+  trigger: SyncTrigger = "manual"
+): Promise<void> {
   const admin = createAdminClient();
-  await admin.from("sync_state").upsert({ user_id: userId, last_started_at: new Date().toISOString(), last_error: null });
+  await admin.from("sync_state").upsert({
+    user_id: userId,
+    last_started_at: new Date().toISOString(),
+    last_trigger: trigger,
+    last_error: null,
+  });
 
   let coursesCount = 0;
   let lessonsCount = 0;
@@ -36,6 +47,15 @@ export async function runSync(userId: string, domain: string, token: string): Pr
     const courses = await listCourses(token);
     coursesCount = courses.length;
 
+    // A class we haven't seen before starts unshared and undecided: it is read,
+    // but nothing is published (and no colleague sees it) until the teacher
+    // answers "Share this class?". Known classes keep their answer.
+    const { data: known, error: knownError } = await admin
+      .from("courses")
+      .select("google_course_id")
+      .eq("owner_id", userId);
+    if (knownError) throw knownError;
+    const knownIds = new Set((known ?? []).map((c) => c.google_course_id));
     const { data: courseRows, error: courseError } = await admin
       .from("courses")
       .upsert(
@@ -44,6 +64,7 @@ export async function runSync(userId: string, domain: string, token: string): Pr
           google_course_id: c.id,
           name: c.name ?? "(untitled class)",
           section: c.section ?? null,
+          ...(knownIds.has(c.id) ? {} : { shared: false, share_decided: false }),
         })),
         { onConflict: "owner_id,google_course_id" }
       )

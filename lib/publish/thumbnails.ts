@@ -27,11 +27,12 @@ export async function fetchCardThumbnails(admin: Admin, userId: string, token: s
   try {
     const { data: lessons, error } = await admin
       .from("lessons")
-      .select("id, courses!inner(shared), attachments(id, position, kind, library_file_id, thumbnail_path)")
+      .select("id, courses!inner(shared, share_decided), attachments(id, position, kind, library_file_id, thumbnail_path)")
       .eq("owner_id", userId)
       .eq("kind", "original")
       .eq("hidden", false)
-      .eq("courses.shared", true);
+      .eq("courses.shared", true)
+      .eq("courses.share_decided", true);
     if (error) throw error;
 
     // Every Drive file with a library copy and no picture yet, each lesson's
@@ -53,6 +54,41 @@ export async function fetchCardThumbnails(admin: Admin, userId: string, token: s
   }
 
   await removeUnusedPictures(admin, userId);
+}
+
+// A brand-new Drive copy often has no picture for about a minute. Once per
+// sync, for the files copied in this run that still have none: wait a little,
+// then look again. At most RETRY_WAIT_MS plus ten files' worth of requests, and
+// never fails the sync. Anything still missing is picked up by the next sync.
+export const RETRY_WAIT_MS = 20_000;
+const RETRY_MAX_FILES = 10;
+
+export async function retryNewPictures(
+  admin: Admin,
+  userId: string,
+  token: string,
+  copiedIds: string[],
+  wait: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+): Promise<void> {
+  if (copiedIds.length === 0) return;
+  try {
+    const { data, error } = await admin
+      .from("attachments")
+      .select("id, position, kind, library_file_id, thumbnail_path")
+      .in("id", copiedIds)
+      .is("thumbnail_path", null)
+      .not("library_file_id", "is", null);
+    if (error) throw error;
+    const todo = ((data ?? []) as Row[]).slice(0, RETRY_MAX_FILES);
+    if (todo.length === 0) return;
+
+    await wait(RETRY_WAIT_MS);
+    let stored = 0;
+    for (const att of todo) if (await fetchOne(admin, userId, att, token)) stored += 1;
+    console.log(`[thumbnails] retry: ${todo.length} tried, ${stored} saved`);
+  } catch (err) {
+    console.error("[thumbnails] retry failed", { userId, error: describeFailure(err) });
+  }
 }
 
 // True when a picture was saved.

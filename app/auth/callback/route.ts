@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { emailDomain } from "@/lib/domain";
 import { encrypt, getTokenKey } from "@/lib/crypto";
+import { SIGN_IN_NEEDED, SIGN_IN_REJECTED } from "@/lib/sync/schedule";
 import { missingScopes } from "@/lib/google/scopes";
 import { refreshAccessToken } from "@/lib/google/token";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -83,6 +84,14 @@ export async function GET(request: NextRequest) {
     await supabase.auth.signOut();
     return toLogin(request, "error=failed");
   }
+
+  // A fresh sign-in fixes a "sign in again" sync error: clear it, and the
+  // sync timestamps, so the next page load syncs straight away.
+  await admin
+    .from("sync_state")
+    .update({ last_error: null, last_started_at: null, last_finished_at: null })
+    .eq("user_id", user.id)
+    .in("last_error", [SIGN_IN_NEEDED, SIGN_IN_REJECTED]);
 
   return NextResponse.redirect(new URL("/lessons", request.url));
 }

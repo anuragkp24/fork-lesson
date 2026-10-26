@@ -2,7 +2,7 @@ import "server-only";
 import { copyWithFallback, createFolder, ensureDomainReader, folderUsable, getFileInfo } from "@/lib/google/drive";
 import { describeFailure } from "@/lib/google/describe";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { fetchCardThumbnails } from "./thumbnails";
+import { fetchCardThumbnails, retryNewPictures } from "./thumbnails";
 
 const LIBRARY_FOLDER_NAME = "Fork Lesson library";
 
@@ -20,16 +20,18 @@ type PendingAttachment = {
 export async function publishLibrary(userId: string, domain: string, token: string): Promise<void> {
   const admin = createAdminClient();
   let folderError: string | null = null;
+  const copiedIds: string[] = []; // attachments given a library copy in this run
 
   try {
     // Shared, not hidden lessons only
     const { data: lessons, error } = await admin
       .from("lessons")
-      .select("id, courses!inner(shared), attachments(id, kind, title, drive_file_id, mime_type, library_file_id)")
+      .select("id, courses!inner(shared, share_decided), attachments(id, kind, title, drive_file_id, mime_type, library_file_id)")
       .eq("owner_id", userId)
       .eq("kind", "original")
       .eq("hidden", false)
-      .eq("courses.shared", true);
+      .eq("courses.shared", true)
+      .eq("courses.share_decided", true);
     if (error) throw error;
 
     const drive = (lessons ?? []).flatMap((l) => l.attachments).filter((a) => a.kind === "drive");
@@ -46,7 +48,10 @@ export async function publishLibrary(userId: string, domain: string, token: stri
         const result = existing
           ? { libraryFileId: existing, error: null }
           : await publishOne(att, folderId, token);
-        if (result.libraryFileId) copiedThisRun.set(att.drive_file_id, result.libraryFileId);
+        if (result.libraryFileId) {
+          copiedThisRun.set(att.drive_file_id, result.libraryFileId);
+          copiedIds.push(att.id);
+        }
         await admin
           .from("attachments")
           .update({ library_file_id: result.libraryFileId, publish_error: result.error })
@@ -60,6 +65,7 @@ export async function publishLibrary(userId: string, domain: string, token: stri
 
   // Card pictures, from the library copies. Read-only on Google; never fails the sync.
   await fetchCardThumbnails(admin, userId, token);
+  await retryNewPictures(admin, userId, token, copiedIds);
 
   // published_count = Drive files from this teacher's lessons that are in the library
   const { count } = await admin

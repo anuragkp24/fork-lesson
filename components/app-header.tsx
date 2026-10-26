@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { after } from "next/server";
 import { initials } from "@/lib/initials";
 import { createClient, getUser } from "@/lib/supabase/server";
+import { syncIfStale } from "@/lib/sync/auto";
 import { btnSecondary } from "@/lib/ui";
 import { Logo } from "./logo";
 
@@ -10,6 +12,14 @@ export async function AppHeader({ current }: { current: "lessons" | "library" | 
   const { data: profile } = user
     ? await supabase.from("users").select("name, email, domain").eq("id", user.id).maybeSingle()
     : { data: null };
+
+  // Every signed-in page keeps the teacher's library current: after the page
+  // is sent, sync in the background if the last sync is over 30 minutes old.
+  // syncIfStale never throws, and nothing here waits for it.
+  if (user && profile?.domain) {
+    const domain = profile.domain;
+    after(() => syncIfStale(user.id, domain, "visit"));
+  }
 
   const tab = (active: boolean) =>
     `inline-flex min-h-11 items-center border-b-2 px-1 text-[15px] font-semibold ${

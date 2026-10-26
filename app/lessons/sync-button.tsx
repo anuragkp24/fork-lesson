@@ -11,7 +11,7 @@ export function SyncButton() {
       disabled={pending}
       className={btnPrimary}
     >
-      {pending ? "Syncing…" : "Sync and publish"}
+      {pending ? "Syncing…" : "Sync now"}
     </button>
   );
 }

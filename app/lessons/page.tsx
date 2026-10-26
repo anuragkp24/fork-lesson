@@ -8,11 +8,15 @@ import { topTags } from "@/lib/hub/tags";
 import { forkThanksState, thanksBadge } from "@/lib/hub/thanks";
 import { firstName } from "@/lib/initials";
 import { myForkStatus } from "@/lib/library/forks";
+import { hasForkableAttachment } from "@/lib/library/qualifies";
 import { lessonsTab, publishProblemLabel } from "@/lib/library/tabs";
 import { logQueryError } from "@/lib/supabase/log";
 import { createClient, getUser } from "@/lib/supabase/server";
 import { alertError } from "@/lib/ui";
+import { needsSync, syncedAgo } from "@/lib/sync/schedule";
 import { syncAction } from "./actions";
+import { AutoRefresh } from "./auto-refresh";
+import { SharePrompt } from "./share-prompt";
 import { SyncButton } from "./sync-button";
 
 type Attachment = {
@@ -46,6 +50,8 @@ type Course = {
   id: string;
   name: string;
   section: string | null;
+  shared: boolean;
+  share_decided: boolean;
   lessons: Lesson[];
 };
 
@@ -62,6 +68,25 @@ function newestFirst(a: Lesson, b: Lesson) {
   return (b.source_updated_at ?? "").localeCompare(a.source_updated_at ?? "");
 }
 
+// Drive files of mine that still wait for a library copy or a card picture
+// (copies and pictures are done in batches, so a big first sync takes a few runs).
+async function filesWaiting(supabase: Awaited<ReturnType<typeof createClient>>, userId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("attachments")
+    .select("library_file_id, publish_error, thumbnail_path, thumbnail_checked_at, lessons!inner(owner_id, kind, hidden, courses!inner(shared, share_decided))")
+    .eq("kind", "drive")
+    .eq("lessons.owner_id", userId)
+    .eq("lessons.kind", "original")
+    .eq("lessons.hidden", false)
+    .eq("lessons.courses.shared", true)
+    .eq("lessons.courses.share_decided", true)
+    .limit(500);
+  logQueryError("my lessons files waiting", error);
+  return (data ?? []).some(
+    (a) => (!a.library_file_id && !a.publish_error) || (a.library_file_id && !a.thumbnail_path && !a.thumbnail_checked_at)
+  );
+}
+
 const TAB = "inline-flex min-h-11 items-center border-b-2 px-4 text-[15px] font-semibold";
 
 export default async function LessonsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
@@ -75,17 +100,30 @@ export default async function LessonsPage({ searchParams }: { searchParams: Prom
     getAccessToken(user.id),
   ]);
 
+  const now = new Date();
+  const state = needsSync({
+    lastStartedAt: sync?.last_started_at ?? null,
+    lastFinishedAt: sync?.last_finished_at ?? null,
+    now,
+  });
+  // "run" means the page load itself is about to start one (AppHeader).
+  const syncing = state !== "fresh" && google.status === "ok";
+  const moreOnTheWay = !syncing && (await filesWaiting(supabase, user.id));
+
   return (
     <>
       <AppHeader current="lessons" />
+      <AutoRefresh active={syncing} />
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-8 px-5 py-10">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="flex flex-col gap-1">
             <h1 className="text-3xl font-bold">My lessons</h1>
             <p className="text-sm text-muted">
-              {sync?.last_finished_at
-                ? `Last synced ${new Date(sync.last_finished_at).toLocaleString()} · ${sync.courses_count ?? 0} classes, ${sync.lessons_count ?? 0} lessons · ${sync.published_count ?? 0} files in the library`
-                : "Not synced yet. Sync to bring in your Classroom lessons and share them with your district."}
+              {syncing
+                ? "Syncing…"
+                : sync?.last_finished_at
+                  ? `Last synced ${syncedAgo(sync.last_finished_at, now)} · ${sync.courses_count ?? 0} classes, ${sync.lessons_count ?? 0} lessons · ${sync.published_count ?? 0} files in the library${moreOnTheWay ? " · more files are on the way" : ""}`
+                  : "Not synced yet. Your lessons sync on their own when you open the app."}
             </p>
           </div>
           <form action={syncAction}>
@@ -153,7 +191,7 @@ async function SavedLessons({ userId }: { userId: string }) {
     : { data: [] as LibraryLesson[], error: null };
   logQueryError("saved lessons detail", lessonsError);
   const byId = new Map((data ?? []).map((l) => [l.id, l]));
-  const lessons = savedIds.flatMap((id) => byId.get(id) ?? []).filter((l) => l.owner_id !== userId);
+  const lessons = savedIds.flatMap((id) => byId.get(id) ?? []).filter((l) => l.owner_id !== userId && hasForkableAttachment(l.attachments));
 
   const ids = lessons.map((l) => l.id);
   const [{ data: counts, error: countsError }, { data: tagRows, error: tagError }] = ids.length
@@ -195,7 +233,7 @@ async function MyLessons({ userId, showEmptyNote }: { userId: string; showEmptyN
   const { data: courses, error: coursesError } = await supabase
     .from("courses")
     .select(
-      "id, name, section, lessons(id, title, description, topic_name, source_updated_at, kind, classroom_state, fork_id, forked_from_lesson_id, attachments(id, position, kind, title, url, mime_type, unsupported_type, library_file_id, publish_error, thumbnail_path, thumbnail_version))"
+      "id, name, section, shared, share_decided, lessons(id, title, description, topic_name, source_updated_at, kind, classroom_state, fork_id, forked_from_lesson_id, attachments(id, position, kind, title, url, mime_type, unsupported_type, library_file_id, publish_error, thumbnail_path, thumbnail_version))"
     )
     .eq("owner_id", userId)
     .order("name")
@@ -260,6 +298,7 @@ async function MyLessons({ userId, showEmptyNote }: { userId: string; showEmptyN
             {course.name}
             {course.section && <span className="text-base font-medium text-muted">{course.section}</span>}
           </h2>
+          {!course.share_decided && <SharePrompt courseId={course.id} />}
           {course.lessons.length === 0 && <p className="text-sm text-muted">No lessons in this class.</p>}
           {groupByTopic([...course.lessons].sort(newestFirst)).map(([topic, lessons]) => (
             <div key={topic ?? "(none)"} className="flex flex-col gap-3">
